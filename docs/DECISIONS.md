@@ -47,3 +47,29 @@ Work takes place across multiple ChatGPT and Codex chats, so chat history must n
 **Consequence**
 
 Relevant project documents must be updated whenever a significant decision changes.
+
+---
+
+## Decision 004 — Web-first application
+
+**Decision**
+
+The first version of Investment Tracker will be developed as a responsive web application.
+
+The architecture should allow PWA capabilities to be added gradually.
+
+A desktop or native mobile client is not a requirement for the first version.
+
+**Reason**
+
+The web provides the simplest path for development and testing, is well suited to analytical interfaces, tables, and charts, works across multiple operating systems, and does not require a separate desktop or mobile distribution pipeline.
+
+User file imports can be implemented using standard browser capabilities and do not require a desktop application.
+
+**Consequence**
+
+The frontend will be designed as a responsive web UI.
+
+The backend and financial calculation core must not depend on a specific client platform.
+
+In the future, the web frontend may be extended into a PWA, used inside a desktop wrapper, or supplemented with a separate mobile client.
