@@ -551,3 +551,44 @@ At the same time:
 - Persistence is separated from HTTP.
 - Infrastructure depends inward, not the other way around.
 - New abstractions are created only when there is a concrete need.
+
+---
+
+## Decision 007 — Initial project scaffold and developer tooling
+
+**Decision**
+
+The initial repository scaffold contains two independently managed applications:
+
+- `apps/web` for the Next.js, React, and TypeScript frontend.
+- `apps/api` for the Python and FastAPI backend.
+
+The web application uses the Node.js 24 release line and pnpm. It uses the App Router, a `src/` directory, strict TypeScript, ESLint, Prettier, Vitest, React Testing Library, jsdom, and `@testing-library/jest-dom`.
+
+The API uses the Python 3.14 release line and uv. Backend tooling is configured in `pyproject.toml` and includes Ruff, Pyright, pytest, and HTTPX-based FastAPI testing.
+
+Runtime release lines are the current scaffold compatibility policy rather than a permanent architectural identity. Exact dependency versions are captured by application lockfiles.
+
+The initial API exposes only `GET /health` as an external-dependency-free liveness check. The initial web page is only a minimal Investment Tracker scaffold.
+
+Only modules required by working functionality are created. The logical `domain`, `application`, and `infrastructure` boundaries from Decision 006 remain in force but are not represented by empty packages. A composition root is not created until concrete wiring exists.
+
+Playwright remains the approved end-to-end testing technology but is not initialized until an end-to-end test is needed.
+
+No root package manager workspace or monorepo orchestration framework is introduced. Each application owns its dependencies, lockfile, commands, and checks.
+
+**Reason**
+
+The first scaffold establishes a small, reproducible development baseline for both approved runtimes and verifies that the web and API applications can be installed, started, linted, typechecked, formatted, and tested independently.
+
+Keeping the scaffold minimal avoids speculative architecture and infrastructure while providing an executable foundation for future product work.
+
+**Consequences**
+
+Developers need both supported runtime release lines and the corresponding package managers.
+
+Application changes must keep the relevant lint, typecheck, test, and format checks passing. Dependency lockfiles are committed for reproducible installation.
+
+Application-code changes use short-lived branches and pull requests.
+
+The physical backend structure will grow only when real use cases require the approved architectural layers. Database setup, migrations, Docker, authentication, financial features, and external integrations are not part of this scaffold.

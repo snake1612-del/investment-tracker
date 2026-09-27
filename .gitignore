@@ -2,6 +2,12 @@
 .env
 .env.*
 !.env.example
+.npmrc
+.pypirc
+*.pem
+*.key
+credentials.json
+secrets.json
 
 # Node.js / Next.js / TypeScript
 node_modules/
@@ -18,6 +24,7 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
+.pnpm-store/
 
 # Python / FastAPI
 __pycache__/
@@ -26,6 +33,8 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.pyright/
+.uv-cache/
 .coverage
 htmlcov/
 .tox/
