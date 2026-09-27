@@ -1,0 +1,44 @@
+:root {
+  color-scheme: light;
+  font-family: Arial, Helvetica, sans-serif;
+  background: #f4f7f5;
+  color: #17221c;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  min-height: 100vh;
+  margin: 0;
+}
+
+main {
+  width: min(42rem, calc(100% - 3rem));
+  margin: 0 auto;
+  padding: 8rem 0;
+}
+
+h1 {
+  margin: 0.5rem 0 1rem;
+  font-size: clamp(2.5rem, 8vw, 5rem);
+  letter-spacing: -0.05em;
+}
+
+.eyebrow {
+  margin: 0;
+  color: #28704b;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.summary {
+  max-width: 38rem;
+  margin: 0;
+  color: #4c5c53;
+  font-size: 1.125rem;
+  line-height: 1.7;
+}
