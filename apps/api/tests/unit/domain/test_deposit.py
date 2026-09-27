@@ -29,3 +29,15 @@ def test_deposit_rejects_non_positive_amount(amount: Decimal) -> None:
 def test_deposit_requires_structural_currency_code(currency: str) -> None:
     with pytest.raises(InvalidTransaction):
         CanonicalTransaction.deposit(7, Decimal("1"), currency, date(2026, 9, 27))
+
+
+@pytest.mark.parametrize("amount", ["1.123456789", "10000000000000000"])
+def test_deposit_rejects_values_not_exactly_storable_as_numeric_24_8(amount: str) -> None:
+    with pytest.raises(InvalidTransaction, match="NUMERIC\\(24,8\\)"):
+        CanonicalTransaction.deposit(7, Decimal(amount), "USD", date(2026, 9, 27))
+
+
+@pytest.mark.parametrize("amount", ["123456.12500001", "1.2300000000"])
+def test_deposit_accepts_exactly_storable_values_and_cosmetic_zeroes(amount: str) -> None:
+    transaction = CanonicalTransaction.deposit(7, Decimal(amount), "USD", date(2026, 9, 27))
+    assert transaction.cash_amount == Decimal(amount)

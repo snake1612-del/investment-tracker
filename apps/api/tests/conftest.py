@@ -18,6 +18,8 @@ def checked_test_urls() -> tuple[URL, URL]:
     if not development or not test:
         raise RuntimeError("DATABASE_URL and TEST_DATABASE_URL are required for PostgreSQL tests")
     development_url, test_url = make_url(development), make_url(test)
+    if development_url.query or test_url.query:
+        raise RuntimeError("PostgreSQL test URLs must not contain query parameters")
     if (
         development_url.drivername != "postgresql+psycopg"
         or test_url.drivername != "postgresql+psycopg"
@@ -37,7 +39,15 @@ def checked_test_urls() -> tuple[URL, URL]:
         raise RuntimeError("Test and development URLs must use the same local PostgreSQL server")
     if test_url.host not in {"localhost", "127.0.0.1", "::1"}:
         raise RuntimeError("Test bootstrap is restricted to local PostgreSQL")
-    return development_url, test_url
+    validated_test_url = URL.create(
+        drivername="postgresql+psycopg",
+        username=test_url.username,
+        password=test_url.password,
+        host=test_url.host,
+        port=test_url.port,
+        database="investment_tracker_test",
+    )
+    return development_url, validated_test_url
 
 
 @pytest.fixture(scope="session")

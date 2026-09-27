@@ -26,6 +26,18 @@ def valid_currency_code(value: str) -> bool:
     return re.fullmatch(r"[A-Z]{3}", value) is not None
 
 
+def fits_cash_amount_column(value: Decimal) -> bool:
+    """Check exact NUMERIC(24,8) fit without rounding or a decimal context."""
+    digits = value.as_tuple().digits
+    exponent = value.as_tuple().exponent
+    if not isinstance(exponent, int):
+        return False
+    while digits[-1] == 0:
+        digits = digits[:-1]
+        exponent += 1
+    return exponent >= -8 and len(digits) + exponent <= 16
+
+
 @dataclass(frozen=True)
 class CanonicalTransaction:
     account_id: int
@@ -51,6 +63,10 @@ class CanonicalTransaction:
     ) -> CanonicalTransaction:
         if not isinstance(cash_amount, Decimal) or not cash_amount.is_finite() or cash_amount <= 0:
             raise InvalidTransaction("Deposit cash_amount must be a positive finite decimal")
+        if not fits_cash_amount_column(cash_amount):
+            raise InvalidTransaction(
+                "Deposit cash_amount cannot be stored exactly as NUMERIC(24,8)"
+            )
         if not valid_currency_code(currency_code):
             raise InvalidTransaction("Currency code must contain three uppercase ASCII letters")
         if not isinstance(effective_date, date):
