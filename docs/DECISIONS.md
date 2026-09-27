@@ -592,3 +592,354 @@ Application changes must keep the relevant lint, typecheck, test, and format che
 Application-code changes use short-lived branches and pull requests.
 
 The physical backend structure will grow only when real use cases require the approved architectural layers. Database setup, migrations, Docker, authentication, financial features, and external integrations are not part of this scaffold.
+
+---
+
+## Decision 008 — Persistence foundation and first data model boundaries
+
+**Decision**
+
+The first Investment Tracker persistence model defines only the canonical accounting inputs and minimal identity boundaries required for subsequent portfolio state reconstruction.
+
+Canonical persistence entities:
+
+- Portfolio.
+- InvestmentAccount.
+- Instrument.
+- Transaction.
+
+Relationships:
+
+```text
+Portfolio 1:N InvestmentAccount
+
+InvestmentAccount 1:N Transaction
+
+Instrument 1:N Transaction
+through nullable Transaction.instrument_id
+
+Transaction 1:N Transaction
+through nullable related_transaction_id
+```
+
+`related_transaction_id` is a nullable self-reference to an originating or related Transaction and allows one transaction to have several related transactions, such as separate FEE or TAX records.
+
+The financial semantics of canonical transactions are defined by Decision F001 in `docs/CALCULATIONS.md`.
+
+### Portfolio
+
+Fields:
+
+- `id` — BIGINT identity.
+- `name` — required.
+- `base_currency` — VARCHAR(3), required.
+- `created_at` — TIMESTAMPTZ.
+- `updated_at` — TIMESTAMPTZ.
+
+At the initial stage, Portfolio does not contain:
+
+- `user_id`.
+- Soft delete.
+- Status.
+
+The absence of `user_id` corresponds to the single-user scope of the first version.
+
+### InvestmentAccount
+
+Fields:
+
+- `id`.
+- `portfolio_id`.
+- `name`.
+- `created_at`.
+- `updated_at`.
+
+At the initial stage, InvestmentAccount does not contain:
+
+- Account currency.
+- Account type.
+- Broker identity.
+- External broker ID.
+- Status.
+
+InvestmentAccount may be multi-currency.
+
+The currency of a canonical transaction is stored on the Transaction itself rather than being determined by an account-level currency.
+
+### Instrument
+
+Initial fields:
+
+- `id`.
+- `name`.
+- `created_at`.
+- `updated_at`.
+
+Instrument is present in the first schema to provide a stable internal identity for a financial instrument.
+
+At this stage, Instrument does not contain:
+
+- Ticker.
+- ISIN.
+- Exchange.
+- Listing.
+- Asset type.
+- Currency.
+- Broker identifiers.
+
+Ticker is not treated as a globally unique instrument identity.
+
+A richer instrument and reference-data model will be defined by a separate decision when a real need appears.
+
+### Transaction
+
+Fields:
+
+- `id`.
+- `account_id`.
+- `instrument_id` — nullable.
+- `related_transaction_id` — nullable.
+- `type`.
+- `quantity` — nullable.
+- `price` — nullable.
+- `cash_amount` — required.
+- `currency_code` — required.
+- `effective_date` — required.
+- `settlement_date` — nullable.
+- `note` — nullable.
+- `created_at`.
+- `updated_at`.
+
+Supported v1 transaction types:
+
+- `DEPOSIT`.
+- `WITHDRAWAL`.
+- `BUY`.
+- `SELL`.
+- `DIVIDEND`.
+- `COUPON`.
+- `FEE`.
+- `TAX`.
+
+Transaction type is stored as VARCHAR with a database constraint that permits only the approved v1 values.
+
+PostgreSQL ENUM is not used for transaction type at this stage.
+
+### Numeric policy
+
+Persistence uses exact decimal representation.
+
+`cash_amount`:
+
+```text
+NUMERIC(24,8)
+```
+
+`quantity`:
+
+```text
+NUMERIC(28,12)
+```
+
+`price`:
+
+```text
+NUMERIC(28,12)
+```
+
+Python-side representation:
+
+```text
+Decimal
+```
+
+Canonical financial values do not use binary floating point.
+
+The selected storage precision defines the available storage precision but does not define financial rounding methodology.
+
+Rounding rules must be approved separately where they are required by a specific financial methodology.
+
+Canonical numeric magnitudes are non-negative according to Decision F001.
+
+Transaction direction is determined by transaction `type`, not by the sign of a persisted amount or quantity.
+
+### Database constraints
+
+PostgreSQL must provide structural integrity, including:
+
+- Primary keys.
+- Foreign keys.
+- Universal NOT NULL requirements.
+- Approved transaction type values.
+- Non-negative canonical numeric magnitudes.
+- Structural formatting of currency codes.
+- Prevention of a direct transaction self-reference through `related_transaction_id`.
+
+Large transaction-type-specific conditional CHECK constraints are not introduced at the initial stage.
+
+For example, the rule:
+
+```text
+BUY requires instrument / quantity / price
+```
+
+initially belongs to application and domain validation rather than a complex database CHECK expression.
+
+Database constraints must protect universal structural invariants without prematurely encoding financial methodology that has not yet been approved.
+
+### Foreign-key and delete policy
+
+Foreign keys use conservative RESTRICT semantics.
+
+Accounting history is not cascade-deleted.
+
+In particular, a Transaction referenced through `related_transaction_id` must not automatically:
+
+- Cascade-delete related records.
+- Leave them silently detached through automatic nullification of the relationship.
+
+Deletion and correction of canonical transactions are performed deliberately through application logic.
+
+A stricter audit or reversal model may be introduced later through a separate decision.
+
+### Time semantics
+
+`effective_date` represents the financial or business date of a transaction.
+
+For:
+
+- `BUY`.
+- `SELL`.
+
+it is the trade or execution date.
+
+For other types, it is the business-effective date of the corresponding event.
+
+`settlement_date` is the nullable actual settlement date.
+
+It is intended primarily for operations where settlement is a separate known fact.
+
+The system must not derive a settlement date automatically through hardcoded T+1 or T+2 assumptions.
+
+`created_at` and `updated_at` are UTC-aware persistence timestamps and describe the persistence lifecycle rather than financial effective time.
+
+### Canonical source of truth
+
+Persisted canonical facts:
+
+- Portfolio metadata.
+- InvestmentAccount metadata.
+- Instrument identity.
+- Transaction history.
+
+The following values are derived state and are not an independent accounting source of truth:
+
+- Cash balances.
+- Positions.
+- Lots.
+- Cost basis.
+- Average price.
+- Realised P&L.
+- Unrealised P&L.
+- Portfolio value.
+- Allocation.
+- TWR.
+- XIRR.
+- Benchmark result.
+- FX effect.
+
+If caches, snapshots, or materialized derived state are introduced in the future, they must be rebuildable from canonical inputs and approved financial methodology.
+
+### Local database direction
+
+When persistence implementation begins, the initial local development direction is:
+
+```text
+Next.js    → host
+FastAPI    → host
+PostgreSQL → Docker Compose
+```
+
+This defines the direction of the next implementation step.
+
+Docker Compose is not created as part of the Decision 008 documentation update itself.
+
+### First persistence vertical slice
+
+The first approved backend persistence slice is:
+
+```text
+Create Portfolio
+→ Create InvestmentAccount
+→ Create DEPOSIT Transaction
+→ Read persisted data
+```
+
+This slice does not include:
+
+- UI.
+- BUY/SELL.
+- P&L.
+- Market data.
+
+Instrument exists in the initial schema for stable internal identity, but separate Instrument CRUD is not required by the first vertical slice.
+
+**Reason**
+
+Investment Tracker uses transaction history as canonical accounting input, while portfolio state and financial metrics must be calculated from canonical facts.
+
+The first persistence model must therefore preserve the minimal set of facts required for subsequent:
+
+- Portfolio reconstruction.
+- Calculation of positions.
+- Cost-basis calculations.
+- Cash-flow reconstruction.
+- Realised and unrealised P&L.
+- Performance calculations.
+- Benchmark calculations.
+- Future broker and import normalization.
+
+At the same time, the schema must not prematurely design:
+
+- Broker-specific identities.
+- Instrument reference-data model.
+- Account taxonomy.
+- Derived portfolio state.
+- Financial methodology that has not yet been approved.
+
+Portfolio, InvestmentAccount, Instrument, and Transaction provide the minimal stable boundaries for the first persistence implementation.
+
+The Transaction design relies on the approved Decision F001 — Canonical transaction semantics.
+
+Financial semantics that have not yet been approved must not be invented at the database schema level.
+
+**Consequences**
+
+Transaction history becomes the canonical persistence foundation for accounting calculations.
+
+Cash balances, positions, lots, cost basis, P&L, performance, and other portfolio metrics are not stored as an independent source of truth.
+
+Canonical transaction values use unsigned or non-negative magnitudes and exact decimal representation.
+
+Transaction direction is determined by `type`.
+
+Fees and taxes may exist as separate related transactions through `related_transaction_id`.
+
+Instrument identity exists from the first schema, while instrument metadata intentionally remains minimal.
+
+The database provides universal structural integrity, while transaction-type-specific financial validation initially remains in domain and application logic.
+
+Delete behavior is conservative and does not use cascade deletion of accounting history.
+
+PostgreSQL, Docker, Alembic, and SQLAlchemy implementation remains a separate next step and is not part of this documentation change.
+
+The first persistence implementation must be limited to the minimal vertical slice:
+
+```text
+Portfolio
+→ InvestmentAccount
+→ DEPOSIT Transaction
+→ persisted read
+```
+
+without premature BUY/SELL, P&L, market data, or UI.
