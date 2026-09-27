@@ -943,3 +943,943 @@ Portfolio
 ```
 
 without premature BUY/SELL, P&L, market data, or UI.
+
+---
+
+## Decision 009 — Persistence implementation, migrations and local database
+
+**Decision**
+
+Decision 008 определил canonical persistence model и первый persistence vertical slice.
+
+Decision 009 определяет способ реализации этой модели: local PostgreSQL, SQLAlchemy infrastructure, Alembic migrations, transaction boundaries, repository/UoW contracts, первый persistence API и соответствующую test strategy.
+
+Финансовая семантика canonical transactions остаётся определённой Decision F001 в `docs/CALCULATIONS.md`.
+
+### Runtime architecture
+
+Основное runtime/dependency direction:
+
+```text
+HTTP / FastAPI
+→ Application use-case functions
+→ framework-independent Domain where justified
+→ application-facing Unit of Work / repository contracts
+→ SQLAlchemy infrastructure
+→ Psycopg 3 sync
+→ PostgreSQL 18
+```
+
+Application layer не знает о SQLAlchemy `Session`.
+
+SQLAlchemy infrastructure является implementation detail.
+
+### Transaction ownership
+
+Одна application use case определяет logical transaction boundary.
+
+Для mutating use case:
+
+```text
+HTTP request
+→ application use case
+→ open Unit of Work
+→ repository operations
+→ application explicitly calls uow.commit()
+→ close
+```
+
+При exception:
+
+```text
+rollback
+→ close
+```
+
+Правила:
+
+- repository implementations не вызывают `commit`;
+- FastAPI routes не вызывают `commit`;
+- concrete Unit of Work владеет SQLAlchemy Session mechanics;
+- application use case определяет момент успешного commit;
+- SQLAlchemy Session не передаётся в domain.
+
+### Composition root
+
+Теперь, когда появляется реальное persistence wiring, создаётся composition-root responsibility:
+
+`app/bootstrap.py`
+
+Composition root связывает concrete infrastructure с application/API dependencies, включая:
+
+```text
+configuration
+→ engine/session factory
+→ SqlAlchemyUnitOfWork factory
+```
+
+Это реализует ранее отложенную ответственность из Decision 006.
+
+FastAPI routes не должны самостоятельно создавать SQLAlchemy Sessions или concrete repositories.
+
+Отдельный dependency injection framework не используется.
+
+`main.py` остаётся FastAPI entry point и не превращается в большой infrastructure wiring module.
+
+### Local PostgreSQL
+
+Local development использует PostgreSQL 18.
+
+Architecture фиксирует PostgreSQL 18 major compatibility line.
+
+Repository configuration при этом pin-ит конкретный поддерживаемый PostgreSQL 18 maintenance image.
+
+Initial image:
+
+```text
+postgres:18.6
+```
+
+Не используются:
+
+- `postgres:latest`;
+- unpinned major-only image;
+- PostgreSQL 19 beta/pre-release.
+
+Maintenance update внутри PostgreSQL 18 является обычным reviewed dependency-maintenance change после прохождения tests и не требует нового architectural Decision.
+
+Переход с PostgreSQL 18 на следующую major release является отдельным explicit upgrade task.
+
+### Docker Compose
+
+Docker Compose используется только для local PostgreSQL.
+
+Initial Compose environment содержит один service:
+
+```text
+db
+```
+
+Он использует:
+
+- PostgreSQL 18.6 initial pinned image;
+- database `investment_tracker`;
+- disposable local-development user `investment_tracker`;
+- port `5432`;
+- named volume `postgres_data`;
+- `pg_isready` healthcheck;
+- no automatic restart policy.
+
+FastAPI и Next.js продолжают запускаться непосредственно на host.
+
+Не добавляются:
+
+- FastAPI container;
+- Next.js container;
+- pgAdmin;
+- Adminer;
+- Redis;
+- reverse proxy;
+- другие infrastructure services.
+
+Disposable local-development credentials могут находиться в safe example/local-development configuration.
+
+Production или real secrets никогда не commit-ятся.
+
+### Environment configuration
+
+Backend persistence configuration использует:
+
+- `DATABASE_URL`;
+- `TEST_DATABASE_URL`.
+
+Ignored local file:
+
+`apps/api/.env`
+
+Committed example:
+
+`apps/api/.env.example`
+
+`.env.example` содержит только безопасные disposable local-development values.
+
+Не добавляются:
+
+- `pydantic-settings`;
+- `python-dotenv`.
+
+Используется небольшой stdlib-based configuration module.
+
+Local development commands могут передавать `.env` через:
+
+```text
+uv run --env-file .env ...
+```
+
+Application runtime должен требовать только configuration, которая ему действительно нужна.
+
+Обычный API startup не должен завершаться ошибкой только из-за отсутствия `TEST_DATABASE_URL`.
+
+`TEST_DATABASE_URL` является test-specific configuration.
+
+### SQLAlchemy
+
+Используется SQLAlchemy 2.x в modern typed declarative style:
+
+- `DeclarativeBase`;
+- `Mapped`;
+- `mapped_column`.
+
+Persistence implementation является synchronous.
+
+Не используется:
+
+- `AsyncSession`;
+- async PostgreSQL driver.
+
+Session configuration:
+
+- `autoflush=True`;
+- `expire_on_commit=False`.
+
+`infrastructure/db` владеет:
+
+- Base / MetaData;
+- ORM models;
+- engine/session factory;
+- repository implementations;
+- concrete Unit of Work;
+- SQLAlchemy-specific persistence behavior.
+
+Пока существуют только четыре небольшие модели, они могут находиться вместе в:
+
+`infrastructure/db/models.py`
+
+Initial tables:
+
+- `portfolios`;
+- `investment_accounts`;
+- `instruments`;
+- `transactions`.
+
+Не вводится one-file-per-model structure без конкретной необходимости.
+
+### ORM boundary
+
+SQLAlchemy ORM objects не должны выходить через repository contracts в:
+
+- application;
+- domain;
+- API contracts.
+
+Repository contracts предоставляют только небольшие application/domain-friendly records, values или results, действительно необходимые use cases.
+
+Не создаются:
+
+- mapper framework;
+- duplicate hierarchy classes для каждого ORM model;
+- generic persistence DTO framework.
+
+Mapping выполняется явно и локально там, где он реально необходим.
+
+### Canonical persistence model
+
+Physical schema реализует Decision 008.
+
+#### portfolios
+
+- `id` — BIGINT identity;
+- `name` — required;
+- `base_currency` — VARCHAR(3), required;
+- `created_at` — timezone-aware timestamp;
+- `updated_at` — timezone-aware timestamp.
+
+#### investment_accounts
+
+- `id` — BIGINT identity;
+- `portfolio_id` — required FK;
+- `name` — required;
+- `created_at`;
+- `updated_at`.
+
+#### instruments
+
+- `id` — BIGINT identity;
+- `name` — required;
+- `created_at`;
+- `updated_at`.
+
+#### transactions
+
+- `id` — BIGINT identity;
+- `account_id` — required FK;
+- `instrument_id` — nullable FK;
+- `related_transaction_id` — nullable self-FK;
+- `type` — VARCHAR constrained to approved v1 values;
+- `quantity` — nullable `NUMERIC(28,12)`;
+- `price` — nullable `NUMERIC(28,12)`;
+- `cash_amount` — required `NUMERIC(24,8)`;
+- `currency_code` — required;
+- `effective_date` — required DATE;
+- `settlement_date` — nullable DATE;
+- `note` — nullable;
+- `created_at`;
+- `updated_at`.
+
+Supported v1 types:
+
+- `DEPOSIT`;
+- `WITHDRAWAL`;
+- `BUY`;
+- `SELL`;
+- `DIVIDEND`;
+- `COUPON`;
+- `FEE`;
+- `TAX`.
+
+Transaction type остаётся VARCHAR + CHECK constraint.
+
+PostgreSQL ENUM не используется.
+
+Canonical numeric magnitudes используют non-negative constraints согласно Decision 008/F001.
+
+Database также обеспечивает:
+
+- PKs;
+- FKs;
+- universal NOT NULL constraints;
+- approved transaction types;
+- currency structural format;
+- no direct transaction self-reference;
+- conservative RESTRICT delete behavior.
+
+Большие transaction-type-specific CHECK expressions не вводятся.
+
+### Numeric representation
+
+Persistence использует PostgreSQL NUMERIC.
+
+Python использует `Decimal`.
+
+Canonical monetary/accounting quantities не преобразуются в binary floating point.
+
+Storage precision не определяет финансовую rounding methodology.
+
+### Timestamps
+
+`created_at` и initial `updated_at` являются PostgreSQL server-generated timezone-aware timestamps.
+
+Future changes to `updated_at` выполняются через explicit persistence/application mutation behavior.
+
+Не вводятся:
+
+- database triggers;
+- SQLAlchemy event hooks;
+- hidden timestamp update machinery.
+
+### Alembic
+
+Alembic располагается в:
+
+- `apps/api/alembic.ini`;
+- `apps/api/migrations/`.
+
+Alembic использует:
+
+- `Base.metadata`;
+- `DATABASE_URL` из environment.
+
+Credentials не хранятся в `alembic.ini`.
+
+Schema creation/evolution выполняется migrations.
+
+`Base.metadata.create_all()` не используется для:
+
+- normal application bootstrap;
+- normal integration-test schema creation.
+
+Autogenerate может использоваться для создания candidate migration, но migration должна быть manually reviewed перед commit.
+
+Migration, уже merged в shared `main` history, считается immutable.
+
+Исправление shared schema выполняется новой migration.
+
+Unmerged feature-branch migration может быть regenerated до merge.
+
+Initial migration создаёт ровно четыре таблицы:
+
+- `portfolios`;
+- `investment_accounts`;
+- `instruments`;
+- `transactions`;
+
+с constraints Decision 008.
+
+Seed/demo data не добавляется.
+
+### Database naming convention
+
+SQLAlchemy MetaData использует naming convention для:
+
+- primary keys;
+- foreign keys;
+- unique constraints;
+- check constraints;
+- indexes.
+
+Convention:
+
+```text
+pk_%(table_name)s
+fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s
+uq_%(table_name)s_%(column_0_name)s
+ck_%(table_name)s_%(constraint_name)s
+ix_%(table_name)s_%(column_0_name)s
+```
+
+CHECK constraints получают короткие semantic names.
+
+### Initial indexes
+
+Первоначально создаются только индексы, для которых уже существует непосредственная use-case необходимость:
+
+- `investment_accounts.portfolio_id`;
+- `transactions.account_id`.
+
+Nullable/future fields не индексируются заранее без конкретной query need.
+
+### Repository policy
+
+Generic Repository Pattern не используется.
+
+Первый slice требует только следующих capabilities.
+
+`PortfolioRepository`:
+
+- `add`;
+- `get`.
+
+`InvestmentAccountRepository`:
+
+- `add`;
+- `get`.
+
+`TransactionRepository`:
+
+- `add`;
+- `list_for_account`.
+
+`InstrumentRepository` пока не вводится.
+
+Также не создаются speculative methods/abstractions:
+
+- `update`;
+- `delete`;
+- `list_all`;
+- pagination;
+- generic filtering;
+- `BaseRepository`;
+- `GenericRepository`;
+- `RepositoryFactory`;
+- `CRUDMixin`.
+
+Concrete repositories используют SQLAlchemy Session, но никогда не выполняют `commit`.
+
+### Unit of Work
+
+Вводится один минимальный application-facing Unit of Work contract.
+
+Это соответствует Decision 006: UoW появляется только теперь, когда существуют реальные mutating persistence use cases и transaction boundary.
+
+Concrete `SqlAlchemyUnitOfWork` владеет:
+
+- Session creation;
+- concrete repositories;
+- commit;
+- rollback;
+- close.
+
+Application usage conceptually:
+
+```python
+with uow:
+    ...
+    uow.commit()
+```
+
+Не создаётся generic UoW framework или дополнительная hierarchy abstractions.
+
+### Domain transaction validation
+
+Transaction является первым persistence concept, для которого оправдана небольшая framework-independent domain representation.
+
+Initial domain может содержать:
+
+- `TransactionType`;
+- небольшой `CanonicalTransaction` representation/value object;
+- DEPOSIT factory/validation.
+
+Не создаётся subtype hierarchy:
+
+- `BuyTransaction`;
+- `SellTransaction`;
+- `DepositTransaction`;
+- `FeeTransaction`;
+- и аналогичные transaction subclasses.
+
+Для первого slice DEPOSIT имеет правила:
+
+- type = `DEPOSIT`;
+- instrument отсутствует;
+- related transaction отсутствует;
+- quantity отсутствует;
+- price отсутствует;
+- `cash_amount > 0`;
+- `currency_code` состоит ровно из трёх uppercase ASCII letters;
+- `effective_date` required;
+- `settlement_date` absent;
+- note optional.
+
+Existence account проверяется application orchestration, а не самим Transaction domain object.
+
+Universal DB constraint для `cash_amount` остаётся:
+
+```text
+cash_amount >= 0
+```
+
+DEPOSIT-specific domain rule строже:
+
+```text
+cash_amount > 0
+```
+
+Decision 009 не вводит дополнительную currency-support methodology или currency whitelist.
+
+### Application layer
+
+Initial application layer использует typed use-case functions, а не отдельный service class на каждый endpoint.
+
+Первоначально необходимы use cases примерно следующего уровня:
+
+- `create_portfolio`;
+- `create_investment_account`;
+- `create_deposit`;
+- `list_account_transactions`.
+
+Service classes не создаются без реальной необходимости.
+
+Application use cases работают через repository/UoW contracts и не знают о concrete SQLAlchemy implementations.
+
+### Initial API
+
+Первый persistence API ограничен:
+
+```text
+POST /portfolios
+
+POST /portfolios/{portfolio_id}/accounts
+
+POST /accounts/{account_id}/deposits
+
+GET /accounts/{account_id}/transactions
+```
+
+Response status:
+
+- create → `201`;
+- read → `200`.
+
+Known application outcomes:
+
+- missing Portfolio → `404`;
+- missing Account → `404`;
+- invalid domain/application input → `422`;
+- known persistence conflict → `409`.
+
+Unexpected infrastructure failures не должны раскрывать raw SQLAlchemy/PostgreSQL error details клиенту.
+
+Generic:
+
+```text
+POST /transactions
+```
+
+пока не создаётся.
+
+Существующий:
+
+```text
+GET /health
+```
+
+сохраняется.
+
+### Decimal and date API contract
+
+Canonical Decimal values передаются через HTTP как JSON strings.
+
+Direction:
+
+```text
+PostgreSQL NUMERIC
+→ Python Decimal
+→ JSON decimal string
+→ TypeScript string
+```
+
+Canonical amounts не сериализуются как JSON floating-point numbers.
+
+String representation должна сохранять exact decimal value, но Decision 009 не устанавливает cosmetic fixed-scale/trailing-zero formatting.
+
+Например:
+
+```text
+"100000.00"
+```
+
+и:
+
+```text
+"100000.00000000"
+```
+
+могут представлять одно и то же exact canonical numeric value.
+
+API tests не должны зависеть от cosmetic trailing-zero count, пока отдельное API-formatting решение не установит такое требование.
+
+Dates:
+
+```text
+DATE → YYYY-MM-DD
+```
+
+Persistence timestamps:
+
+- ISO 8601;
+- timezone-aware;
+- UTC.
+
+### PostgreSQL driver
+
+Используется Psycopg 3 в synchronous mode.
+
+SQLAlchemy dialect:
+
+```text
+postgresql+psycopg
+```
+
+Dependency:
+
+```text
+psycopg[binary]
+```
+
+Не добавляются:
+
+- `psycopg2`;
+- `asyncpg`.
+
+### Test PostgreSQL
+
+Persistence integration/API tests используют real PostgreSQL.
+
+Local PostgreSQL instance может содержать:
+
+- development DB: `investment_tracker`;
+- test DB: `investment_tracker_test`.
+
+`TEST_DATABASE_URL` должен указывать исключительно на test database.
+
+Test bootstrap обязан немедленно завершаться ошибкой, если `TEST_DATABASE_URL` resolves к той же database, что и `DATABASE_URL`.
+
+Automated tests никогда не должны:
+
+- truncate development DB;
+- drop development DB;
+- reset development DB.
+
+Local test bootstrap должен:
+
+1. проверить, что development и test URLs указывают на разные database names;
+2. использовать local PostgreSQL maintenance/bootstrap connection;
+3. создавать или пересоздавать только `investment_tracker_test`;
+4. никогда не выполнять destructive database-level operation над `investment_tracker`;
+5. применять к test database:
+
+```text
+alembic upgrade head
+```
+
+Для schema setup не используется `Base.metadata.create_all()`.
+
+Tests не запускают Docker самостоятельно.
+
+Prerequisite:
+
+```text
+docker compose up -d db
+```
+
+Testcontainers не используется.
+
+Parallel database tests пока не требуются.
+
+Между integration/API tests применяется простой deterministic cleanup test tables/identities.
+
+Не вводится сложная nested-savepoint infrastructure без необходимости.
+
+### Migration verification
+
+Первый persistence PR должен проверить полный migration lifecycle.
+
+Из пустой DB:
+
+```text
+alembic upgrade head
+```
+
+должен создать ожидаемую four-table schema.
+
+Также проверяется:
+
+```text
+alembic downgrade base
+alembic upgrade head
+```
+
+И:
+
+```text
+alembic check
+```
+
+не должен обнаруживать model/schema migration drift.
+
+### Test coverage
+
+Минимальное meaningful coverage:
+
+Domain:
+
+- valid Deposit;
+- negative amount rejected;
+- zero amount rejected;
+- canonical Deposit не имеет instrument/settlement/relation.
+
+Application with fake UoW/repositories:
+
+- missing Account → NotFound;
+- valid Deposit persists and commits;
+- invalid Deposit does not commit.
+
+DB integration:
+
+```text
+Portfolio
+→ Account
+→ Deposit
+→ read transactions
+```
+
+Проверяются:
+
+- BIGINT IDs;
+- Decimal round-trip;
+- DATE round-trip;
+- foreign keys;
+- ORM/persistence mapping.
+
+API integration:
+
+```text
+POST Portfolio
+→ POST Account
+→ POST Deposit
+→ GET account transactions
+```
+
+Также:
+
+- nonexistent Portfolio → `404`;
+- nonexistent Account → `404`;
+- invalid Deposit → `422`.
+
+Existing health test сохраняется.
+
+Не создаются десятки trivial tests без дополнительной confidence value.
+
+### Developer workflow
+
+Expected local database workflow:
+
+```text
+docker compose up -d db
+```
+
+Backend:
+
+```text
+cd apps/api
+uv sync
+```
+
+Local environment создаётся из committed `.env.example`.
+
+Schema применяется через Alembic.
+
+Unit tests могут выполняться без PostgreSQL.
+
+Full persistence test suite выполняется после запуска local PostgreSQL.
+
+README должен документировать только реально работающие команды, добавленные этим implementation.
+
+### Dependencies
+
+Новые dependencies ограничиваются concrete persistence need:
+
+- SQLAlchemy 2.x;
+- Alembic;
+- `psycopg[binary]` 3.x.
+
+Не добавляются:
+
+- `pydantic-settings`;
+- `python-dotenv`;
+- testcontainers;
+- factory-boy;
+- faker;
+- pytest-postgresql;
+- SQLModel;
+- dependency-injector.
+
+### First implementation PR
+
+Persistence foundation реализуется одним vertical-slice PR.
+
+Scope:
+
+- local PostgreSQL Compose service;
+- environment policy;
+- SQLAlchemy foundation;
+- four ORM models;
+- initial Alembic migration;
+- minimal repositories;
+- minimal Unit of Work;
+- composition-root wiring;
+- DEPOSIT domain validation;
+- Create Portfolio;
+- Create InvestmentAccount;
+- Create Deposit;
+- List Account Transactions;
+- migration/integration/API tests;
+- README local database workflow.
+
+Workflow:
+
+Issue:
+
+`Implement initial persistence vertical slice`
+
+Branch:
+
+`feat/initial-persistence-slice`
+
+Commit:
+
+`feat: implement initial persistence vertical slice`
+
+PR:
+
+`Implement initial persistence vertical slice`
+
+Application-code workflow остаётся:
+
+```text
+Issue
+→ short-lived branch
+→ implementation
+→ checks/tests
+→ commit
+→ push
+→ PR
+→ review
+→ merge
+```
+
+### Explicitly deferred
+
+Decision 009 не реализует:
+
+- BUY/SELL API;
+- generic transaction creation;
+- Instrument CRUD;
+- FEE/TAX API;
+- Dividend/Coupon API;
+- FIFO/lots;
+- realised P&L;
+- unrealised P&L;
+- fee → cost basis methodology;
+- market data;
+- FX methodology;
+- tax calculation;
+- broker integrations;
+- imports;
+- authentication;
+- frontend/UI;
+- cache/snapshots;
+- async SQLAlchemy;
+- Redis/Celery;
+- background workers;
+- production database hosting;
+- cloud deployment;
+- Kubernetes;
+- CI/CD changes.
+
+**Reason**
+
+Decision 008 определил canonical persistence entities и source-of-truth boundary, но не определял implementation mechanics.
+
+Первый persistence implementation должен сохранить framework-independent domain/application layers, обеспечить безопасные transaction boundaries и сделать schema evolution воспроизводимой через migrations.
+
+SQLAlchemy 2.x и Psycopg 3 дают synchronous persistence foundation, совместимую с выбранным FastAPI backend без преждевременного async complexity.
+
+Alembic становится единственным normal schema-evolution mechanism, чтобы physical database schema оставалась versioned и reviewable.
+
+Minimal repositories и Unit of Work появляются только вместе с реальными persistence use cases и не превращаются в generic data-access framework.
+
+Real PostgreSQL используется в integration/API persistence tests, потому что PostgreSQL-specific constraints, numeric behavior, foreign keys и migrations являются частью persistence correctness.
+
+Первый vertical slice сознательно ограничен:
+
+```text
+Portfolio
+→ InvestmentAccount
+→ DEPOSIT
+→ persisted read
+```
+
+чтобы проверить всю цепочку HTTP → application → domain → persistence → PostgreSQL без преждевременного введения BUY/SELL, P&L, market data или новой финансовой методологии.
+
+**Consequences**
+
+Project получает первый real persistence layer и local PostgreSQL development environment.
+
+`infrastructure/db` физически появляется согласно boundaries Decision 006.
+
+Минимальный application-facing Unit of Work становится transaction boundary между application и SQLAlchemy infrastructure.
+
+FastAPI routes остаются thin и не получают SQLAlchemy Session или commit responsibility.
+
+Schema создаётся и изменяется только через Alembic migrations.
+
+Canonical Decimal values сохраняются как PostgreSQL NUMERIC / Python Decimal и пересекают HTTP boundary как JSON strings.
+
+Integration/API persistence tests требуют запущенного local PostgreSQL, тогда как domain/application unit tests остаются независимыми от database.
+
+Test database отделяется от development database и защищается fail-fast checks против destructive reset неправильной DB.
+
+PostgreSQL 18 является текущей supported major line, а конкретный maintenance image pin остаётся обновляемой repository configuration.
+
+Decision F001 остаётся единственным financial source of truth для canonical transaction semantics; Decision 009 не определяет FIFO, P&L, cost basis, FX или другую отложенную финансовую методологию.
