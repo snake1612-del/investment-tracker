@@ -6,6 +6,9 @@ requires-python = ">=3.14,<3.15"
 dependencies = [
     "fastapi",
     "uvicorn[standard]",
+    "SQLAlchemy>=2,<3",
+    "alembic",
+    "psycopg[binary]>=3,<4",
 ]
 
 [dependency-groups]
@@ -22,6 +25,7 @@ package = false
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+addopts = ["--import-mode=importlib"]
 
 [tool.ruff]
 target-version = "py314"
