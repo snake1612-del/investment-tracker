@@ -156,14 +156,18 @@ def test_related_transaction_self_reference_and_restrict_delete(
 def test_concrete_uow_rolls_back_all_uncommitted_repository_work(
     clean_db: sessionmaker[Session],
 ) -> None:
+    uow = SqlAlchemyUnitOfWork(clean_db)
     with pytest.raises(RuntimeError, match="abort use case"):
-        with SqlAlchemyUnitOfWork(clean_db) as uow:
+        with uow:
             portfolio = uow.portfolios.add("Uncommitted", "USD")
             account = uow.accounts.add(portfolio.id, "Uncommitted account")
+            assert portfolio.id > 0 and account.id > 0
+            assert uow.session.in_transaction()
             assert uow.portfolios.get(portfolio.id) == portfolio
             assert uow.accounts.get(account.id) == account
             raise RuntimeError("abort use case")
 
+    assert not uow.session.in_transaction()
     with clean_db() as session:
         assert (
             session.execute(
