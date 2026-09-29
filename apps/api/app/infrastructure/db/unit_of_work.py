@@ -6,12 +6,14 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.application.contracts import (
+    InstrumentRepository,
     InvestmentAccountRepository,
     PortfolioRepository,
     TransactionRepository,
 )
 from app.application.use_cases import PersistenceConflict
 from app.infrastructure.db.repositories import (
+    SqlAlchemyInstrumentRepository,
     SqlAlchemyInvestmentAccountRepository,
     SqlAlchemyPortfolioRepository,
     SqlAlchemyTransactionRepository,
@@ -28,6 +30,7 @@ class SqlAlchemyUnitOfWork:
         self.accounts: InvestmentAccountRepository = SqlAlchemyInvestmentAccountRepository(
             self.session
         )
+        self.instruments: InstrumentRepository = SqlAlchemyInstrumentRepository(self.session)
         self.transactions: TransactionRepository = SqlAlchemyTransactionRepository(self.session)
         return self
 

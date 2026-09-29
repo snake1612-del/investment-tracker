@@ -4,8 +4,15 @@ from collections.abc import Callable
 from datetime import date
 from decimal import Decimal
 
-from app.application.contracts import AccountRecord, PortfolioRecord, TransactionRecord, UnitOfWork
-from app.domain.transactions import CanonicalTransaction, valid_currency_code
+from app.application.contracts import (
+    AccountRecord,
+    InstrumentRecord,
+    PortfolioRecord,
+    TransactionRecord,
+    UnitOfWork,
+)
+from app.domain.instruments import normalized_instrument_name
+from app.domain.transactions import CanonicalTransaction, TransactionType, valid_currency_code
 
 
 class NotFound(Exception):
@@ -43,6 +50,19 @@ def create_investment_account(factory: UowFactory, portfolio_id: int, name: str)
         return result
 
 
+def create_instrument(factory: UowFactory, name: str) -> InstrumentRecord:
+    trimmed_name = normalized_instrument_name(name)
+    with factory() as uow:
+        result = uow.instruments.add(trimmed_name)
+        uow.commit()
+        return result
+
+
+def list_instruments(factory: UowFactory) -> list[InstrumentRecord]:
+    with factory() as uow:
+        return uow.instruments.list()
+
+
 def create_deposit(
     factory: UowFactory,
     account_id: int,
@@ -56,6 +76,99 @@ def create_deposit(
             raise NotFound("Investment account not found")
         transaction = CanonicalTransaction.deposit(
             account_id, cash_amount, currency_code, effective_date, note
+        )
+        result = uow.transactions.add(transaction)
+        uow.commit()
+        return result
+
+
+def create_buy(
+    factory: UowFactory,
+    account_id: int,
+    instrument_id: int,
+    quantity: Decimal,
+    price: Decimal,
+    cash_amount: Decimal,
+    currency_code: str,
+    effective_date: date,
+    settlement_date: date | None = None,
+    note: str | None = None,
+) -> TransactionRecord:
+    return _create_manual_trade(
+        factory,
+        TransactionType.BUY,
+        account_id,
+        instrument_id,
+        quantity,
+        price,
+        cash_amount,
+        currency_code,
+        effective_date,
+        settlement_date,
+        note,
+    )
+
+
+def create_sell(
+    factory: UowFactory,
+    account_id: int,
+    instrument_id: int,
+    quantity: Decimal,
+    price: Decimal,
+    cash_amount: Decimal,
+    currency_code: str,
+    effective_date: date,
+    settlement_date: date | None = None,
+    note: str | None = None,
+) -> TransactionRecord:
+    return _create_manual_trade(
+        factory,
+        TransactionType.SELL,
+        account_id,
+        instrument_id,
+        quantity,
+        price,
+        cash_amount,
+        currency_code,
+        effective_date,
+        settlement_date,
+        note,
+    )
+
+
+def _create_manual_trade(
+    factory: UowFactory,
+    trade_type: TransactionType,
+    account_id: int,
+    instrument_id: int,
+    quantity: Decimal,
+    price: Decimal,
+    cash_amount: Decimal,
+    currency_code: str,
+    effective_date: date,
+    settlement_date: date | None,
+    note: str | None,
+) -> TransactionRecord:
+    with factory() as uow:
+        if uow.accounts.get(account_id) is None:
+            raise NotFound("Investment account not found")
+        if uow.instruments.get(instrument_id) is None:
+            raise NotFound("Instrument not found")
+        constructor = (
+            CanonicalTransaction.buy
+            if trade_type is TransactionType.BUY
+            else CanonicalTransaction.sell
+        )
+        transaction = constructor(
+            account_id,
+            instrument_id,
+            quantity,
+            price,
+            cash_amount,
+            currency_code,
+            effective_date,
+            settlement_date,
+            note,
         )
         result = uow.transactions.add(transaction)
         uow.commit()

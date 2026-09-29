@@ -3,11 +3,13 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, status
 
-from app.api.schemas import DepositCreate, TransactionRead
+from app.api.schemas import DepositCreate, TradeCreate, TransactionRead
 from app.application.use_cases import (
     InvalidInput,
     UowFactory,
+    create_buy,
     create_deposit,
+    create_sell,
     list_account_transactions,
 )
 from app.bootstrap import get_uow_factory
@@ -32,6 +34,67 @@ def post_deposit(
     return TransactionRead.from_record(
         create_deposit(
             factory, account_id, amount, body.currency_code, body.effective_date, body.note
+        )
+    )
+
+
+def _trade_decimals(body: TradeCreate) -> tuple[Decimal, Decimal, Decimal]:
+    try:
+        return Decimal(body.quantity), Decimal(body.price), Decimal(body.cash_amount)
+    except InvalidOperation as exc:
+        raise InvalidInput("quantity, price and cash_amount must be decimal strings") from exc
+
+
+@router.post(
+    "/accounts/{account_id}/buys",
+    status_code=status.HTTP_201_CREATED,
+    response_model=TransactionRead,
+)
+def post_buy(
+    account_id: int,
+    body: TradeCreate,
+    factory: Annotated[UowFactory, Depends(get_uow_factory)],
+) -> TransactionRead:
+    quantity, price, cash_amount = _trade_decimals(body)
+    return TransactionRead.from_record(
+        create_buy(
+            factory,
+            account_id,
+            body.instrument_id,
+            quantity,
+            price,
+            cash_amount,
+            body.currency_code,
+            body.effective_date,
+            body.settlement_date,
+            body.note,
+        )
+    )
+
+
+@router.post(
+    "/accounts/{account_id}/sells",
+    status_code=status.HTTP_201_CREATED,
+    response_model=TransactionRead,
+)
+def post_sell(
+    account_id: int,
+    body: TradeCreate,
+    factory: Annotated[UowFactory, Depends(get_uow_factory)],
+) -> TransactionRead:
+    quantity, price, cash_amount = _trade_decimals(body)
+    return TransactionRead.from_record(
+        create_sell(
+            factory,
+            account_id,
+            body.instrument_id,
+            quantity,
+            price,
+            cash_amount,
+            body.currency_code,
+            body.effective_date,
+            body.settlement_date,
+            body.note,
         )
     )
 
