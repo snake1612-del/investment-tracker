@@ -1883,3 +1883,642 @@ Test database отделяется от development database и защищает
 PostgreSQL 18 является текущей supported major line, а конкретный maintenance image pin остаётся обновляемой repository configuration.
 
 Decision F001 остаётся единственным financial source of truth для canonical transaction semantics; Decision 009 не определяет FIFO, P&L, cost basis, FX или другую отложенную финансовую методологию.
+
+## Decision 010 — Minimal Instrument and manual BUY / SELL vertical slice
+
+**Decision**
+
+The next backend-only vertical slice is:
+
+```text
+Instrument create/list
+→ manual BUY / SELL
+→ existing account transaction-history read
+```
+
+This slice does not introduce portfolio calculations or frontend UI.
+
+Financial semantics for canonical trades remain defined by Decisions F001 and F002 in `docs/CALCULATIONS.md`.
+
+### Instrument persistence model
+
+The existing Instrument persistence model remains unchanged.
+
+Fields remain:
+
+- `id`;
+- `name`;
+- `created_at`;
+- `updated_at`.
+
+Decision 010 does NOT add:
+
+- ticker;
+- ISIN;
+- FIGI;
+- exchange;
+- asset class;
+- instrument currency;
+- quotation metadata;
+- provider identifiers;
+- `portfolio_id`;
+- `account_id`.
+
+Instrument is global within the current single-user application.
+
+It is not owned by a Portfolio or InvestmentAccount.
+
+Decision 010 does not introduce:
+
+- Instrument membership tables;
+- holdings tables;
+- watchlists;
+- account-to-instrument pre-association.
+
+Any existing global Instrument may be referenced by any existing InvestmentAccount transaction.
+
+### Instrument name semantics
+
+For manual Instrument creation:
+
+- surrounding whitespace is trimmed;
+- the resulting name is required;
+- length must be between 1 and 200 characters inclusive;
+- internal whitespace is preserved;
+- Unicode is allowed.
+
+Duplicate Instrument names are allowed.
+
+Decision 010 does not define:
+
+- case-sensitive uniqueness;
+- case-insensitive uniqueness;
+- canonical-name normalization;
+- a UNIQUE constraint on Instrument name.
+
+Instrument identity remains its internal `id`, not its name.
+
+### No-schema-migration guardrail
+
+Decision 010 requires no schema migration.
+
+Before implementing this slice, Development must verify that the existing physical `Instrument.name` column can represent the approved application rule of 1..200 characters.
+
+If the existing persistence capacity contradicts this requirement, implementation must stop and report the mismatch.
+
+Development must not silently:
+
+- add a migration;
+- change the schema;
+- weaken the approved application rule;
+- change Decision 010.
+
+Any required schema change must be decided explicitly before implementation continues.
+
+### Instrument API
+
+The minimal public Instrument API is:
+
+```text
+POST /instruments
+GET /instruments
+```
+
+`POST /instruments`:
+
+- creates an Instrument;
+- returns `201`;
+- returns the created Instrument.
+
+`GET /instruments`:
+
+- returns existing Instruments;
+- uses deterministic `id ASC` ordering.
+
+This slice does not require:
+
+```text
+GET /instruments/{id}
+```
+
+The public Instrument API does not include:
+
+- search;
+- autocomplete;
+- pagination;
+- filtering;
+- reference-data synchronization.
+
+### Instrument repository
+
+Add an application-facing Instrument repository with only:
+
+- `add`;
+- `get`;
+- `list`.
+
+These capabilities are justified by current use cases:
+
+- `add` → create Instrument;
+- `get` → validate Instrument existence for BUY/SELL;
+- `list` → minimal Instrument selection/read API.
+
+The repository is exposed through the existing Unit of Work.
+
+No generic repository abstraction is introduced.
+
+### Manual BUY / SELL API
+
+Manual BUY and SELL use separate explicit endpoints:
+
+```text
+POST /accounts/{account_id}/buys
+POST /accounts/{account_id}/sells
+```
+
+Decision 010 does NOT introduce:
+
+- generic `POST /transactions`;
+- generic public `POST /trades`.
+
+The endpoint determines transaction type.
+
+`account_id` comes from the path.
+
+Request does not contain:
+
+- `type`;
+- `account_id`;
+- `related_transaction_id`;
+- fee;
+- tax.
+
+For manual BUY/SELL created by this slice:
+
+```text
+related_transaction_id = null
+```
+
+### BUY / SELL request
+
+Required fields:
+
+- `instrument_id`;
+- `quantity`;
+- `price`;
+- `cash_amount`;
+- `currency_code`;
+- `effective_date`.
+
+Optional fields:
+
+- `settlement_date`;
+- `note`.
+
+These rules are intentionally stricter than the general canonical persistence capability.
+
+### Decimal and canonical validation
+
+Manual BUY/SELL follows Decision F002.
+
+Validation requires:
+
+- `instrument_id` present;
+- `quantity > 0`;
+- `price > 0`;
+- `cash_amount > 0`;
+- `currency_code` exactly three uppercase ASCII letters;
+- `effective_date` present;
+- when `settlement_date` exists:
+  `settlement_date >= effective_date`.
+
+No supported-currency whitelist is introduced.
+
+Historical/backdated `effective_date` values are allowed.
+
+There is no current-date validation.
+
+Canonical Decimal input and output cross HTTP as JSON strings.
+
+Binary floating-point conversion must not be used.
+
+Exact persistence representability must be enforced against:
+
+```text
+quantity    → NUMERIC(28,12)
+price       → NUMERIC(28,12)
+cash_amount → NUMERIC(24,8)
+```
+
+Values that cannot be represented exactly must be rejected.
+
+The application must not silently:
+
+- round;
+- truncate;
+- quantize-to-fit;
+- convert through float.
+
+Storage precision does not define:
+
+- financial rounding;
+- tick size;
+- instrument precision;
+- currency rounding.
+
+### Independent factual trade inputs
+
+For manual BUY/SELL:
+
+- `quantity`;
+- `price`;
+- `cash_amount`;
+
+remain independent factual inputs.
+
+The application must never rewrite:
+
+```text
+cash_amount = quantity × price
+```
+
+If exact arithmetic produces:
+
+```text
+quantity × price != cash_amount
+```
+
+the trade remains valid.
+
+The submitted `cash_amount` must remain unchanged.
+
+Decision 010 does not introduce a reconciliation-warning mechanism.
+
+It does not introduce:
+
+- `warnings[]`;
+- domain warning framework;
+- events framework;
+- reconciliation tolerance.
+
+### Transaction response and history
+
+Successful BUY or SELL creation returns:
+
+```text
+201
+```
+
+and uses the same canonical Transaction representation already used by:
+
+```text
+GET /accounts/{account_id}/transactions
+```
+
+Conceptually this representation includes:
+
+- `id`;
+- `account_id`;
+- `instrument_id`;
+- `related_transaction_id`;
+- `type`;
+- `quantity`;
+- `price`;
+- `cash_amount`;
+- `currency_code`;
+- `effective_date`;
+- `settlement_date`;
+- `note`;
+- `created_at`;
+- `updated_at`.
+
+Decimal fields are serialized as JSON strings.
+
+Dates use ISO:
+
+```text
+YYYY-MM-DD
+```
+
+No separate trade-history endpoint is added.
+
+Existing account transaction history remains deterministically ordered by:
+
+```text
+id ASC
+```
+
+This ordering is only persistence-read ordering.
+
+It does NOT establish financial chronology.
+
+Financial chronology cannot be inferred from `id`, because historical/backdated transactions may be entered after newer transactions.
+
+### Application use cases
+
+Add explicit public application use cases:
+
+- `create_instrument`;
+- `list_instruments`;
+- `create_buy`;
+- `create_sell`.
+
+Reuse the existing account transaction-history use case.
+
+BUY and SELL remain explicit public application capabilities.
+
+They may share private internal orchestration helpers where that reduces duplication.
+
+Do not expose a generic public/application `create_trade` use case merely for deduplication.
+
+### Domain
+
+Continue using the existing framework-independent transaction concepts:
+
+- `CanonicalTransaction`;
+- `TransactionType`.
+
+Do not introduce:
+
+- `BuyTransaction`;
+- `SellTransaction`;
+- Trade hierarchy;
+- transaction subtype inheritance.
+
+Add type-specific BUY/SELL validation to the existing framework-independent domain.
+
+Domain/canonical validation owns:
+
+- required Instrument identity for a manual trade;
+- positive `quantity`;
+- positive `price`;
+- positive `cash_amount`;
+- exact `[A-Z]{3}` currency structure;
+- exact Decimal representability;
+- settlement-date ordering;
+- independent factual quantity/price/cash values.
+
+Application orchestration owns:
+
+- Account existence;
+- Instrument existence.
+
+Existence checks use repositories.
+
+SQLAlchemy ORM relationships or objects must not leak into domain logic.
+
+### Account ↔ Instrument relationship
+
+Decision 010 introduces no Account-to-Instrument pre-association.
+
+Any global Instrument may be referenced by any existing InvestmentAccount.
+
+No additional relationship is created for:
+
+- holdings;
+- allowed instruments;
+- portfolio membership;
+- watchlists;
+- instrument ownership.
+
+Positions remain derived state from canonical transactions.
+
+### SELL and derived state
+
+Manual SELL creation does not consult reconstructed positions.
+
+This slice contains:
+
+- no position lookup;
+- no oversell validation;
+- no oversell warning;
+- no position engine.
+
+A SELL is not rejected merely because its quantity would exceed currently reconstructed position.
+
+This follows Decision F002 and does not establish short-selling methodology.
+
+Derived-state infrastructure must not be introduced merely to create canonical trades.
+
+### FEE / TAX
+
+FEE and TAX creation are not part of this slice.
+
+Do not introduce:
+
+- FEE endpoint;
+- TAX endpoint;
+- combined trade + fee workflow;
+- combined trade + tax workflow.
+
+FEE and TAX remain separate future canonical Transactions according to Decisions F001/F002.
+
+Decision 010 does not define fee → cost basis or tax methodology.
+
+### Persistence
+
+No migration is expected.
+
+Reuse the existing persistence model:
+
+- Instrument table;
+- Transaction table;
+- existing BUY/SELL transaction type values;
+- `instrument_id`;
+- `quantity`;
+- `price`;
+- `cash_amount`;
+- `currency_code`;
+- effective/settlement date columns;
+- existing foreign keys and universal constraints.
+
+Application/domain rules remain intentionally stricter than the general persistence schema.
+
+No schema redesign is introduced by Decision 010.
+
+### Errors
+
+Reuse the existing minimal application/API error conventions.
+
+Return `404` for:
+
+- Account not found;
+- Instrument not found.
+
+Return `422` for invalid input including:
+
+- blank Instrument name;
+- Instrument name longer than 200 characters;
+- non-positive quantity;
+- non-positive price;
+- non-positive cash amount;
+- invalid currency format;
+- settlement before effective date;
+- invalid decimal syntax;
+- Decimal value not exactly representable in canonical persistence precision.
+
+Unexpected infrastructure details must not leak through API responses.
+
+Decision 010 does not introduce a new persistence-conflict model.
+
+If an already existing application persistence-conflict outcome genuinely applies, its existing `409` mapping may continue to be used.
+
+Duplicate Instrument names are explicitly allowed and must not produce `409`.
+
+### Tests
+
+Minimum meaningful coverage for this slice includes the following.
+
+Instrument domain/application behavior:
+
+- valid name accepted;
+- surrounding whitespace trimmed;
+- blank-after-trim rejected;
+- name longer than 200 characters rejected;
+- duplicate name semantics accepted.
+
+BUY/SELL domain:
+
+- valid BUY;
+- valid SELL;
+- non-positive quantity rejected;
+- non-positive price rejected;
+- non-positive cash amount rejected;
+- invalid/lowercase currency rejected;
+- settlement before effective date rejected;
+- missing settlement accepted;
+- historical effective date accepted;
+- exact Decimal representability enforced;
+- quantity/price/cash mismatch accepted;
+- submitted `cash_amount` preserved;
+- no position/oversell validation.
+
+Application:
+
+- create Instrument;
+- list Instruments;
+- missing Account;
+- missing Instrument;
+- successful BUY;
+- successful SELL;
+- successful mutating use case commits exactly once;
+- failed use case does not commit.
+
+Persistence/integration:
+
+- Instrument add/get/list;
+- deterministic Instrument `id ASC` list;
+- BUY/SELL persistence and read-back;
+- foreign-key behavior;
+- exact Decimal round-trip;
+- optional settlement date.
+
+API:
+
+- create Instrument;
+- list Instruments;
+- create BUY;
+- create SELL;
+- account transaction history exposes canonical trade facts;
+- Decimal fields are strings;
+- dates serialize correctly;
+- relevant `404` and `422` outcomes;
+- quantity/price/cash mismatch accepted;
+- backdated trade accepted.
+
+No portfolio golden tests are added because Decision 010 introduces no portfolio calculation methodology or engine behavior.
+
+### Explicit non-scope
+
+Decision 010 does NOT introduce:
+
+- ticker;
+- ISIN;
+- FIGI;
+- exchange/listing model;
+- asset class;
+- instrument/reference-data master system;
+- instrument currency;
+- quotation metadata;
+- provider identifiers;
+- Instrument search/autocomplete/pagination;
+- holdings;
+- watchlists;
+- generic transaction API;
+- generic public trade API;
+- FEE/TAX creation;
+- reconciliation-warning framework;
+- positions;
+- oversell validation;
+- short-selling methodology;
+- FIFO;
+- lots;
+- average cost;
+- cost basis;
+- realised P&L;
+- unrealised P&L;
+- fee → cost basis methodology;
+- tax methodology;
+- market data;
+- FX;
+- bond quotation semantics;
+- accrued interest;
+- settlement accounting engine;
+- orders/executions/partial fills;
+- corporate actions;
+- broker imports;
+- portfolio performance;
+- TWR/XIRR;
+- benchmarks;
+- frontend trade UI;
+- authentication;
+- multi-user ownership;
+- schema redesign.
+
+**Reason**
+
+Decision 008 intentionally introduced Instrument as a minimal stable internal identity before requiring a complete reference-data model.
+
+Decision 009 implemented persistence around canonical transactions but deliberately stopped at DEPOSIT and did not provide Instrument creation/read workflow.
+
+Decision F002 now defines the financial semantics required for manual BUY/SELL.
+
+The smallest coherent next slice therefore needs only:
+
+```text
+minimal Instrument creation/read
+→ explicit manual BUY/SELL entry
+→ existing canonical transaction-history read
+```
+
+A richer Instrument model is not required to record trades for instruments that are correctly representable by a direct monetary unit price.
+
+Keeping Instrument global to the current single-user application avoids inventing unnecessary ownership or membership models.
+
+Separate BUY and SELL endpoints/use cases keep transaction intent explicit and avoid prematurely exposing a generic transaction/trade creation interface.
+
+The slice intentionally does not depend on reconstructed position, reconciliation warnings, portfolio calculation logic, FEE/TAX creation, or reference-data infrastructure.
+
+This preserves the project's pattern of introducing only abstractions and functionality required by the current vertical slice.
+
+**Consequences**
+
+The backend gains a minimal Instrument creation/list workflow and can record canonical manual BUY and SELL transactions according to Decision F002.
+
+Instrument persistence remains intentionally minimal and unchanged.
+
+Duplicate Instrument names remain valid; internal `id` is the stable identity.
+
+Any existing global Instrument can be used by any existing InvestmentAccount.
+
+Manual BUY/SELL application/domain validation becomes stricter than the general persistence schema.
+
+Canonical quantity, price and cash amount remain independent exact Decimal facts.
+
+BUY/SELL persistence does not depend on positions, cost basis, P&L or other derived state.
+
+Existing account transaction history becomes the read surface for DEPOSIT, BUY and SELL canonical records, using deterministic `id ASC` persistence ordering without treating that ordering as financial chronology.
+
+No schema migration is expected. If existing physical Instrument-name capacity cannot support the approved 1..200 rule, implementation must stop for a new architecture/schema decision instead of silently changing persistence.
+
+Decision 010 adds no new financial methodology beyond Decisions F001/F002 and leaves portfolio calculations, richer instrument metadata, FEE/TAX creation and all other deferred areas unresolved.
