@@ -36,6 +36,13 @@ class InstrumentRecord:
 
 
 @dataclass(frozen=True)
+class PositionRecord:
+    instrument_id: int
+    instrument_name: str
+    quantity: Decimal
+
+
+@dataclass(frozen=True)
 class TransactionRecord:
     id: int
     account_id: int
@@ -61,6 +68,7 @@ class PortfolioRepository(Protocol):
 class InvestmentAccountRepository(Protocol):
     def add(self, portfolio_id: int, name: str) -> AccountRecord: ...
     def get(self, account_id: int) -> AccountRecord | None: ...
+    def list_for_portfolio(self, portfolio_id: int) -> list[AccountRecord]: ...
 
 
 class InstrumentRepository(Protocol):

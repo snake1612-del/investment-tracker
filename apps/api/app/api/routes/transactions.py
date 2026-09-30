@@ -3,13 +3,14 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, status
 
-from app.api.schemas import DepositCreate, TradeCreate, TransactionRead
+from app.api.schemas import DepositCreate, PositionRead, TradeCreate, TransactionRead
 from app.application.use_cases import (
     InvalidInput,
     UowFactory,
     create_buy,
     create_deposit,
     create_sell,
+    get_account_positions,
     list_account_transactions,
 )
 from app.bootstrap import get_uow_factory
@@ -106,4 +107,13 @@ def get_transactions(
     return [
         TransactionRead.from_record(record)
         for record in list_account_transactions(factory, account_id)
+    ]
+
+
+@router.get("/accounts/{account_id}/positions", response_model=list[PositionRead])
+def get_positions(
+    account_id: int, factory: Annotated[UowFactory, Depends(get_uow_factory)]
+) -> list[PositionRead]:
+    return [
+        PositionRead.from_record(record) for record in get_account_positions(factory, account_id)
     ]

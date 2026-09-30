@@ -8,6 +8,7 @@ from app.application.contracts import (
     AccountRecord,
     InstrumentRecord,
     PortfolioRecord,
+    PositionRecord,
     TransactionRecord,
 )
 
@@ -113,4 +114,18 @@ class TransactionRead(BaseModel):
             note=record.note,
             created_at=record.created_at,
             updated_at=record.updated_at,
+        )
+
+
+class PositionRead(BaseModel):
+    instrument_id: int
+    instrument_name: str
+    quantity: str
+
+    @classmethod
+    def from_record(cls, record: PositionRecord) -> PositionRead:
+        return cls(
+            instrument_id=record.instrument_id,
+            instrument_name=record.instrument_name,
+            quantity=str(record.quantity),
         )
