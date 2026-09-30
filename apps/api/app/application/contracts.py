@@ -28,6 +28,14 @@ class AccountRecord:
 
 
 @dataclass(frozen=True)
+class InstrumentRecord:
+    id: int
+    name: str
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass(frozen=True)
 class TransactionRecord:
     id: int
     account_id: int
@@ -55,6 +63,12 @@ class InvestmentAccountRepository(Protocol):
     def get(self, account_id: int) -> AccountRecord | None: ...
 
 
+class InstrumentRepository(Protocol):
+    def add(self, name: str) -> InstrumentRecord: ...
+    def get(self, instrument_id: int) -> InstrumentRecord | None: ...
+    def list(self) -> list[InstrumentRecord]: ...
+
+
 class TransactionRepository(Protocol):
     def add(self, transaction: CanonicalTransaction) -> TransactionRecord: ...
     def list_for_account(self, account_id: int) -> list[TransactionRecord]: ...
@@ -63,6 +77,7 @@ class TransactionRepository(Protocol):
 class UnitOfWork(Protocol):
     portfolios: PortfolioRepository
     accounts: InvestmentAccountRepository
+    instruments: InstrumentRepository
     transactions: TransactionRepository
 
     def __enter__(self) -> Self: ...

@@ -2,9 +2,14 @@
 
 from datetime import date, datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
-from app.application.contracts import AccountRecord, PortfolioRecord, TransactionRecord
+from app.application.contracts import (
+    AccountRecord,
+    InstrumentRecord,
+    PortfolioRecord,
+    TransactionRecord,
+)
 
 
 class PortfolioCreate(BaseModel):
@@ -40,10 +45,38 @@ class AccountRead(BaseModel):
         return cls(**record.__dict__)
 
 
+class InstrumentCreate(BaseModel):
+    name: str
+
+
+class InstrumentRead(BaseModel):
+    id: int
+    name: str
+    created_at: datetime
+    updated_at: datetime
+
+    @classmethod
+    def from_record(cls, record: InstrumentRecord) -> InstrumentRead:
+        return cls(**record.__dict__)
+
+
 class DepositCreate(BaseModel):
     cash_amount: str
     currency_code: str
     effective_date: date
+    note: str | None = None
+
+
+class TradeCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    instrument_id: int
+    quantity: str
+    price: str
+    cash_amount: str
+    currency_code: str
+    effective_date: date
+    settlement_date: date | None = None
     note: str | None = None
 
 

@@ -1,11 +1,17 @@
-"""SQLAlchemy implementations of the three capabilities needed by this slice."""
+"""SQLAlchemy implementations of the current persistence capabilities."""
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.application.contracts import AccountRecord, PortfolioRecord, TransactionRecord
+from app.application.contracts import (
+    AccountRecord,
+    InstrumentRecord,
+    PortfolioRecord,
+    TransactionRecord,
+)
 from app.domain.transactions import CanonicalTransaction, TransactionType
 from app.infrastructure.db.models import (
+    InstrumentModel,
     InvestmentAccountModel,
     PortfolioModel,
     TransactionModel,
@@ -22,6 +28,10 @@ def account_record(model: InvestmentAccountModel) -> AccountRecord:
     return AccountRecord(
         model.id, model.portfolio_id, model.name, model.created_at, model.updated_at
     )
+
+
+def instrument_record(model: InstrumentModel) -> InstrumentRecord:
+    return InstrumentRecord(model.id, model.name, model.created_at, model.updated_at)
 
 
 def transaction_record(model: TransactionModel) -> TransactionRecord:
@@ -71,6 +81,25 @@ class SqlAlchemyInvestmentAccountRepository:
     def get(self, account_id: int) -> AccountRecord | None:
         model = self.session.get(InvestmentAccountModel, account_id)
         return account_record(model) if model is not None else None
+
+
+class SqlAlchemyInstrumentRepository:
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def add(self, name: str) -> InstrumentRecord:
+        model = InstrumentModel(name=name)
+        self.session.add(model)
+        self.session.flush()
+        return instrument_record(model)
+
+    def get(self, instrument_id: int) -> InstrumentRecord | None:
+        model = self.session.get(InstrumentModel, instrument_id)
+        return instrument_record(model) if model is not None else None
+
+    def list(self) -> list[InstrumentRecord]:
+        models = self.session.scalars(select(InstrumentModel).order_by(InstrumentModel.id)).all()
+        return [instrument_record(model) for model in models]
 
 
 class SqlAlchemyTransactionRepository:
