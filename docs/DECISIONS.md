@@ -2598,3 +2598,316 @@ Decision F003 already defines exact position quantity reconstruction independent
 **Consequences**
 
 Portfolio quantities are recomputed on read from canonical transactions and may be negative. Final zero positions are omitted from the public response. The endpoint shares Account position item semantics and remains quantity-only; it does not imply valuation or short-selling accounting. Persistence schema and financial methodology beyond F003 remain unchanged.
+
+## Decision 013 — FIFO lots and cost-basis foundation
+
+**Decision**
+
+The FIFO Lots / Cost Basis foundation milestone will implement Decision F004 as framework-independent, recomputable derived financial state over canonical transaction history.
+
+The milestone will introduce:
+
+- exact FIFO lot reconstruction;
+- AcquisitionLot results;
+- DisposalMatch results;
+- UnmatchedSell results;
+- Account-level long cost-basis summaries;
+- Portfolio-level long cost-basis aggregation;
+- golden/reference and invariant tests.
+
+It will not persist derived lots or cost basis and will not expose a new public monetary cost-basis or lots API.
+
+### Reconstruction input
+
+The existing `CanonicalTransaction` domain type is not the FIFO reconstruction input because F004 requires stable persisted transaction identity for same-day ordering.
+
+A dedicated immutable framework-independent input:
+
+`LotTransactionFact`
+
+will contain only the canonical facts required by F004, including conceptually:
+
+- transaction_id;
+- account_id;
+- transaction type;
+- instrument_id;
+- quantity;
+- cash_amount;
+- currency_code;
+- effective_date.
+
+Application code explicitly maps persistence-facing transaction records into this domain input.
+
+SQLAlchemy objects and application records do not cross into the FIFO domain engine.
+
+### Reconstruction boundary
+
+FIFO reconstruction operates on exactly one InvestmentAccount at a time.
+
+Conceptually:
+
+`reconstruct_fifo_lots(account_transaction_facts) → FifoReconstruction`
+
+The engine groups relevant transactions by canonical `instrument_id` internally.
+
+It rejects input containing multiple Account identities.
+
+Portfolio FIFO is never performed over combined Account histories.
+
+### Financial ordering
+
+The domain engine owns F004 chronology.
+
+For each Account + Instrument stream, BUY and SELL transactions are processed by:
+
+1. `effective_date ASC`;
+2. `transaction_id ASC`.
+
+Repository ordering has no financial meaning.
+
+No transaction-type priority is applied for same-day events.
+
+A same-day SELL whose transaction ID precedes a BUY remains unmatched if no earlier long lot exists; the later BUY does not retroactively resolve it.
+
+### Quantity arithmetic
+
+FIFO quantity calculations reuse the exact scale-12 integer representation already established for position reconstruction.
+
+Canonical Decimal quantities are converted exactly into integer units of `10^-12`.
+
+All lot matching, remaining quantities and unmatched quantities are calculated with arbitrary-precision integer arithmetic.
+
+No Decimal-context-dependent quantity arithmetic is used.
+
+The small existing scaled-integer conversion primitives may be extracted into a shared module within `domain/portfolio/engine` for reuse by both position and FIFO reconstruction.
+
+### Exact acquisition basis
+
+F004 monetary basis uses exact rational arithmetic.
+
+The internal rational representation will use Python arbitrary-precision `Fraction` wrapped by a small immutable domain value conceptually named:
+
+`ExactMoney`
+
+containing:
+
+- exact rational amount;
+- currency_code.
+
+The wrapper prevents arithmetic between different currencies unless they are explicitly kept in separate currency partitions.
+
+No automatic FX conversion exists.
+
+Canonical `cash_amount` is converted context-independently into exact scale-8 integer units and then into a rational major-currency amount.
+
+Partial basis allocation uses integer quantity ratios and rational money:
+
+`removed_basis = original_basis × matched_quantity_units / original_quantity_units`
+
+Remaining basis is calculated exactly from the original lot:
+
+`remaining_basis = original_basis × remaining_quantity_units / original_quantity_units`
+
+No monetary rounding, truncation or finite Decimal approximation is introduced during reconstruction.
+
+### Acquisition lots
+
+Each canonical BUY creates one distinct derived AcquisitionLot.
+
+The lot contains conceptually:
+
+- source BUY transaction ID;
+- instrument ID;
+- acquisition effective date;
+- original quantity;
+- remaining quantity;
+- original ExactMoney basis;
+- remaining ExactMoney basis.
+
+All lots, including fully closed lots, remain in the reconstruction result.
+
+Open lots are a derived view of lots whose remaining quantity is positive.
+
+BUY lots are never automatically merged.
+
+### Disposal matches
+
+A derived DisposalMatch contains conceptually:
+
+- source SELL transaction ID;
+- source BUY transaction ID;
+- instrument ID;
+- matched quantity;
+- exact removed acquisition basis.
+
+One SELL may produce several matches and one BUY lot may participate in several SELL matches.
+
+Disposal matches are not persisted.
+
+### Unmatched SELLs
+
+If a SELL exceeds available preceding long lots, the excess becomes a derived UnmatchedSell.
+
+It contains conceptually:
+
+- source SELL transaction ID;
+- instrument ID;
+- effective date;
+- unmatched quantity.
+
+It has no monetary acquisition basis.
+
+A later BUY, including a later BUY on the same effective date, does not retroactively resolve an earlier unmatched SELL.
+
+### Reconstruction result
+
+One Account reconstruction contains:
+
+- account identity;
+- all acquisition lots;
+- disposal matches;
+- unmatched sells.
+
+`is_fully_resolved` is derived from the absence of unmatched SELLs rather than stored independently.
+
+Account summaries and open-lot views are derived from the reconstruction rather than duplicated as authoritative state.
+
+### Account summary
+
+For each Account + Instrument, F004 can derive:
+
+- open_long_quantity;
+- remaining acquisition basis partitioned by currency;
+- unmatched_sell_quantity.
+
+Resolution status is derived from unmatched quantity.
+
+`open_long_quantity` is an F004 long-lot concept and is not interchangeable with the F003 net position quantity.
+
+In incomplete or oversold history the two may differ intentionally.
+
+### Portfolio aggregation
+
+Portfolio FIFO is performed separately for every InvestmentAccount.
+
+Only after Account reconstruction are summaries aggregated by canonical `instrument_id`.
+
+Portfolio remaining acquisition basis is summed separately for each currency.
+
+No basis values in different currencies are combined.
+
+Unmatched SELL quantities remain unresolved at the Account boundary and are aggregated only as unresolved quantities.
+
+Long lots in one Account must never resolve or offset an unmatched SELL in another Account.
+
+A Portfolio is not considered fully resolved if any contributing Account reconstruction remains unresolved.
+
+### Transaction-type safety
+
+The FIFO engine explicitly handles all currently known canonical TransactionTypes.
+
+BUY and SELL have lot effects.
+
+Current other canonical types:
+
+- DEPOSIT;
+- WITHDRAWAL;
+- DIVIDEND;
+- COUPON;
+- FEE;
+- TAX.
+
+have explicitly defined no-lot effect under F004.
+
+There is no generic fallback that silently ignores future transaction types.
+
+A future canonical type that may affect quantity or basis requires an explicit financial-methodology decision before FIFO reconstruction accepts it.
+
+Malformed required BUY/SELL reconstruction facts cause explicit domain failure and are never silently skipped or repaired.
+
+### Persistence
+
+Canonical transaction history remains the sole persisted source of truth.
+
+The milestone introduces:
+
+- no Lot table;
+- no DisposalMatch table;
+- no CostBasis table;
+- no materialized view;
+- no cache;
+- no migration.
+
+Create, edit, delete and backdated changes to canonical transaction history are reflected through full reconstruction on subsequent reads.
+
+No incremental lot ledger becomes authoritative.
+
+### Data access
+
+Existing transaction-history repository contracts remain sufficient.
+
+Account reconstruction uses the existing Account transaction-history read.
+
+Portfolio reconstruction lists Accounts belonging to the Portfolio and reconstructs every Account independently before aggregation.
+
+No specialized SQL FIFO query or additional persistence projection is introduced.
+
+### Public API
+
+No new public cost-basis or lot endpoint is introduced in this milestone.
+
+F004 permits exact rational monetary values such as `100/3`, while presentation rounding and long-term HTTP representation have not yet been approved.
+
+The architecture will not expose a finite Decimal approximation and will not prematurely make a numerator/denominator representation part of the public API contract.
+
+Existing quantity-position APIs remain unchanged.
+
+### Testing
+
+F004 is considered incomplete without both ordinary domain tests and normative golden/reference tests.
+
+Golden tests will cover representative approved FIFO cases including open lots, partial disposal, multiple lots, fractional quantities, repeating rational basis, same-date transaction-ID ordering, backdated history, oversells, SELL-only history, Account isolation, mixed currencies, ignored FEE, full-disposal invariants and differing SELL currency.
+
+Invariant tests must verify exactly:
+
+`original quantity = disposed quantity + remaining quantity`
+
+and:
+
+`original basis = removed basis + remaining basis`
+
+with no tolerance or rounding.
+
+Tests must also demonstrate independence from Python Decimal context precision.
+
+Focused PostgreSQL/application integration tests must verify that persisted transaction identity and canonical facts are mapped correctly into FIFO reconstruction, including same-date ordering and Account isolation.
+
+**Reason**
+
+F004 requires stateful FIFO reconstruction, stable persisted transaction identity and exact rational monetary allocation that are not required by the existing position-quantity engine.
+
+A dedicated FIFO reconstruction input preserves the existing CanonicalTransaction boundary while supplying the persisted transaction ID required for deterministic same-day ordering.
+
+Running reconstruction one Account at a time structurally enforces the no-cross-account FIFO rule.
+
+Using exact scaled integers for quantities and Fraction-backed currency-safe money eliminates Decimal-context rounding and preserves repeating acquisition-basis fractions exactly.
+
+Keeping derived lots, matches and basis recomputable avoids introducing authoritative state that could drift after editable or backdated canonical history changes.
+
+Deferring public monetary APIs prevents architecture from inventing presentation rounding or prematurely exposing an internal rational wire representation.
+
+**Consequences**
+
+Investment Tracker gains a complete exact long-position FIFO and acquisition-cost foundation without yet implementing P&L or valuation.
+
+The domain will contain a dedicated FIFO input and exact-money representation in addition to the existing canonical transaction and position models.
+
+Account F004 open-long quantity may differ from F003 net position quantity when canonical history contains unmatched SELLs; both concepts remain distinct.
+
+Portfolio basis is aggregated only after independent Account reconstruction and remains partitioned by currency.
+
+Financial reconstruction remains more computationally expensive than persisted projections because it sorts and rebuilds history on demand, but this is accepted for current single-user scale.
+
+No new HTTP endpoint, schema migration or derived persistence is introduced.
+
+A later product/API decision will be required before exact cost basis is exposed to clients, because presentation rounding and long-term wire representation remain intentionally unresolved.
