@@ -213,15 +213,35 @@ def get_account_positions(factory: UowFactory, account_id: int) -> list[Position
         history = uow.transactions.list_for_account(account_id)
         as_of_date = datetime.now(UTC).date()
         quantities = reconstruct_positions(map(_canonical_from_record, history), as_of_date)
-        nonzero = {
-            instrument_id: quantity for instrument_id, quantity in quantities.items() if quantity
-        }
-        names = {instrument.id: instrument.name for instrument in uow.instruments.list()}
-        positions: list[PositionRecord] = []
-        for instrument_id in sorted(nonzero):
-            if instrument_id not in names:
-                raise PositionDataIntegrityError("Position Instrument metadata is missing")
-            positions.append(
-                PositionRecord(instrument_id, names[instrument_id], nonzero[instrument_id])
-            )
-        return positions
+        return _position_records(uow, quantities)
+
+
+def get_portfolio_positions(factory: UowFactory, portfolio_id: int) -> list[PositionRecord]:
+    """Reconstruct one Portfolio from only its Accounts' canonical histories."""
+    with factory() as uow:
+        if uow.portfolios.get(portfolio_id) is None:
+            raise NotFound("Portfolio not found")
+        accounts = uow.accounts.list_for_portfolio(portfolio_id)
+        as_of_date = datetime.now(UTC).date()
+        history = [
+            _canonical_from_record(record)
+            for account in accounts
+            for record in uow.transactions.list_for_account(account.id)
+        ]
+        quantities = reconstruct_positions(history, as_of_date)
+        return _position_records(uow, quantities)
+
+
+def _position_records(uow: UnitOfWork, quantities: dict[int, Decimal]) -> list[PositionRecord]:
+    nonzero = {
+        instrument_id: quantity for instrument_id, quantity in quantities.items() if quantity
+    }
+    names = {instrument.id: instrument.name for instrument in uow.instruments.list()}
+    positions: list[PositionRecord] = []
+    for instrument_id in sorted(nonzero):
+        if instrument_id not in names:
+            raise PositionDataIntegrityError("Position Instrument metadata is missing")
+        positions.append(
+            PositionRecord(instrument_id, names[instrument_id], nonzero[instrument_id])
+        )
+    return positions

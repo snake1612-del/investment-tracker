@@ -2562,3 +2562,39 @@ Keeping calculation in the domain and using the existing factual-history reposit
 **Consequences**
 
 Account position quantities are computed on read from canonical history and can be recomputed after corrections. Zero positions are omitted from the public response; negative quantities remain visible unchanged. The endpoint reports quantities only, without implying valuation or a complete short-selling methodology. Existing schema and repository contracts remain unchanged.
+
+## Decision 012 — Portfolio position quantity read slice
+
+**Decision**
+
+Extend the Positions / Holdings foundation with one current-position endpoint:
+
+```text
+GET /portfolios/{portfolio_id}/positions
+```
+
+This endpoint uses the same position-item contract as `GET /accounts/{account_id}/positions`: `instrument_id`, `instrument_name`, and exact-value decimal-string `quantity`, ordered by `instrument_id ASC`. It exposes no Account breakdown or additional financial fields. There is no public `as_of` parameter or historical Portfolio endpoint.
+
+Portfolio position quantity follows Decision F003 without a second financial calculation. For an existing Portfolio, the application:
+
+1. Lists only its InvestmentAccounts in deterministic `id ASC` order through one new `InvestmentAccountRepository.list_for_portfolio(portfolio_id)` operation.
+2. Determines one current UTC calendar date for the whole request.
+3. Reads canonical transactions for each listed Account using the existing `TransactionRepository.list_for_account(account_id)` operation.
+4. Maps all records to the same domain `CanonicalTransaction` input used by Account positions and calls `reconstruct_positions` exactly once for the combined history and evaluation date.
+5. Omits final zero quantities, preserves negative quantities, loads Instrument metadata once, attaches names by Instrument ID, and sorts results by Instrument ID.
+
+The application does not sum Account Decimal position results. The existing exact scaled-integer aggregation provides cross-Account totals without depending on the ambient Decimal context. Instrument names are display metadata, not aggregation identity; duplicate names remain separate by ID. Missing metadata for a non-zero position is an internal data-integrity failure.
+
+The use case is read-only and does not commit. A missing Portfolio returns `404`. An existing Portfolio with no Accounts, no trades, or only final zero quantities returns `200` and `[]`. Negative results are returned unchanged, without warning, rejection, clamping, or short-selling classification. Malformed canonical history remains an internal error rather than a client-input `422`.
+
+The accepted v1 data-access pattern is one Portfolio lookup, one Account list, one transaction-history read per Account, and one Instrument list. Transactions outside the requested Portfolio's Accounts never participate. No Portfolio transaction repository method, SQL position aggregation, position repository, materialized state, cache, derived column, or migration is introduced.
+
+This decision does not add Portfolio history, Account breakdown, valuation, cost basis, P&L, allocation, FX, performance, settled/unsettled positions, FEE/TAX features, frontend UI, broker imports, or authentication.
+
+**Reason**
+
+Decision F003 already defines exact position quantity reconstruction independently of account count. Combining the canonical histories of a Portfolio's Accounts before one domain calculation gives the approved Portfolio total while preserving Account/Portfolio isolation and avoiding a second arithmetic path. The existing repository boundaries are sufficient with only the Account-list operation.
+
+**Consequences**
+
+Portfolio quantities are recomputed on read from canonical transactions and may be negative. Final zero positions are omitted from the public response. The endpoint shares Account position item semantics and remains quantity-only; it does not imply valuation or short-selling accounting. Persistence schema and financial methodology beyond F003 remain unchanged.
