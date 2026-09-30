@@ -639,3 +639,198 @@ Reconstruction does not automatically correct incomplete or corrupt canonical hi
 ## Deferred methodology
 
 This decision defines quantity only. It does not define lots, FIFO/LIFO, average cost or price, cost basis, realised or unrealised P&L, valuation, allocation, FX, performance, settlement accounting, corporate actions, or short-selling methodology.
+
+# Decision F004 — FIFO lot and long-position cost-basis reconstruction
+
+## Decision
+
+Canonical transaction history remains the financial source of truth.
+
+Acquisition lots and cost basis are recomputable derived state.
+
+Each canonical BUY creates one distinct acquisition lot within its `(InvestmentAccount, Instrument)` stream.
+
+An acquisition lot derives:
+
+- its source BUY transaction identity;
+- acquisition date from `BUY.effective_date`;
+- original quantity from `BUY.quantity`;
+- original acquisition basis from `BUY.cash_amount`;
+- basis currency from `BUY.currency_code`;
+- remaining quantity;
+- remaining acquisition basis.
+
+BUY lots are not automatically merged.
+
+Lot reconstruction and SELL matching occur independently within each `(account_id, instrument_id)` pair.
+
+A SELL in one InvestmentAccount MUST NOT consume a BUY lot from another InvestmentAccount.
+
+FIFO reconstruction processes BUY and SELL transactions in one deterministic order:
+
+1. `effective_date ASC`;
+2. `transaction_id ASC`.
+
+When a BUY is encountered, it creates an acquisition lot.
+
+When a SELL is encountered, its quantity consumes currently available open BUY lots in FIFO order under that same chronology.
+
+`transaction_id` is a deterministic same-date tie-break for v1. It does not claim to represent actual intraday execution chronology.
+
+Backdated transaction insertion, transaction edits and transaction deletion require complete deterministic recomputation from the current canonical history. Existing derived FIFO assignments are not immutable.
+
+For F004, the authoritative original acquisition basis of a BUY lot is `BUY.cash_amount`.
+
+`BUY.price` remains a canonical factual unit-price value but does not determine total acquisition basis.
+
+The system MUST NOT replace BUY cash amount with `quantity × price`.
+
+F004 cost basis excludes FEE and TAX.
+
+Linked FEE transactions do not increase BUY acquisition basis and do not otherwise modify lot basis in this decision.
+
+TAX does not affect acquisition lot basis.
+
+Fee-adjusted basis and tax basis are deferred to later financial methodology.
+
+When a SELL consumes quantity `q` from a lot with original quantity `Q` and original acquisition basis `B`, the acquisition basis removed by that match is mathematically:
+
+`B × q / Q`.
+
+Proportional acquisition-basis allocation MUST remain mathematically exact.
+
+If division produces a repeating decimal, reconstruction MUST preserve the exact rational result rather than silently rounding to currency minor units, canonical cash precision or another decimal scale.
+
+No binary floating-point arithmetic or silent monetary rounding is permitted.
+
+For each acquisition lot, the following invariants hold exactly:
+
+`original quantity = cumulative disposed quantity + remaining quantity`
+
+and:
+
+`original acquisition basis = cumulative removed acquisition basis + remaining acquisition basis`.
+
+If a lot is fully disposed, its remaining quantity and remaining basis are zero and its cumulative removed acquisition basis equals its original acquisition basis exactly.
+
+SELL quantity determines lot consumption.
+
+SELL price and SELL cash amount do not determine acquisition basis removed from a matched lot. SELL monetary facts are reserved for future proceeds and realised-P&L methodology.
+
+Each lot keeps the currency of its source BUY transaction.
+
+FIFO quantity matching may operate across BUY lots with different basis currencies for the same Account and Instrument.
+
+Monetary basis amounts in different currencies MUST NOT be added into one synthetic amount without FX methodology.
+
+Instead, removed and remaining basis are preserved and aggregated by currency.
+
+SELL currency does not affect FIFO quantity matching or the acquisition basis removed from BUY lots.
+
+If a SELL quantity exceeds the quantity available in preceding supported long BUY lots, all available long lots are consumed under FIFO and the excess remains explicit unmatched SELL quantity.
+
+The reconstruction engine MUST NOT:
+
+- invent an implicit BUY;
+- assign zero acquisition basis to the unresolved quantity as though it were known;
+- clamp the excess away;
+- match the SELL against a future BUY;
+- invent short-position acquisition basis.
+
+Unmatched SELL quantity indicates that long-position acquisition basis cannot be fully reconstructed from the available supported canonical history.
+
+Matched long-lot results remain valid even when unmatched SELL quantity exists.
+
+A future BUY does not retroactively resolve an earlier unmatched SELL under F004. Short-sale and short-cover cost-basis methodology are outside this decision.
+
+A fully closed supported long position has:
+
+- remaining open long quantity of zero;
+- remaining open acquisition basis of zero.
+
+Historical lots and disposal matches may still exist as derived history.
+
+Portfolio-level cost basis is derived only after Account-level FIFO reconstruction.
+
+There is no cross-account FIFO matching.
+
+For the same canonical Instrument, Portfolio remaining acquisition basis may be summed across Accounts only within each basis currency. Mixed currencies remain separate.
+
+Lot and matching identity use canonical `instrument_id`. Instrument names do not define identity.
+
+Acquisition date is BUY `effective_date`.
+
+Disposal date is SELL `effective_date`.
+
+`settlement_date` does not participate in FIFO lot matching or F004 basis reconstruction.
+
+F004 is valid for histories whose relevant long quantity evolution is represented by supported BUY and SELL canonical events.
+
+Corporate actions, transfers with carried basis, stock splits, conversions, mergers, bond amortization and redemption require separate canonical semantics before their effects can be reconstructed.
+
+No additional bond-specific pricing methodology is required for F004 because acquisition basis is derived from factual BUY cash amount rather than reconstructed from quoted price.
+
+Average open cost per unit is not defined by F004.
+
+Lots and cost basis remain recomputable derived state. F004 does not require persisted or materialized lot records.
+
+## Reason
+
+The project already treats canonical transaction history as the accounting source of truth and positions as derived state.
+
+Canonical BUY transactions contain sufficient factual information to establish acquisition lots: Account, Instrument, quantity, cash amount, currency and effective date.
+
+Using BUY cash amount as acquisition basis preserves the previously approved rule that quantity, price and cash amount are independent canonical facts and prevents the cost-basis engine from silently replacing broker/user-reported monetary facts with `quantity × price`.
+
+FIFO provides a deterministic first lot-matching methodology, but unlike pure quantity reconstruction it requires a stable ordering for same-date transactions. `effective_date` followed by `transaction_id` provides a deterministic v1 order without inventing unavailable intraday chronology.
+
+Exact proportional allocation is necessary because canonical quantities and cash amounts can produce non-terminating decimal ratios. Rounding each partial disposal would create order-dependent cumulative drift and could violate the invariant that full disposal removes exactly the original acquisition basis.
+
+Preserving derived basis as an exact rational value until a future explicit rounding boundary avoids embedding presentation, currency or tax rounding rules in lot reconstruction.
+
+Separating cost basis by currency permits factual multi-currency history to be reconstructed without introducing an FX engine.
+
+Explicit unmatched SELL quantity allows the engine to preserve incomplete or oversold factual history without fabricating long acquisition basis or prematurely implementing short-selling accounting.
+
+Deferring FEE treatment keeps F004 independent of unresolved fee eligibility, cross-currency fee conversion, tax rules and future realised-P&L methodology.
+
+## Consequences
+
+The backend financial domain may deterministically reconstruct long acquisition lots from canonical BUY/SELL history.
+
+Each BUY creates one lot with:
+
+- source BUY identity;
+- original and remaining quantity;
+- original and remaining acquisition basis;
+- basis currency.
+
+SELL transactions consume prior open BUY lots using FIFO within the same Account and Instrument.
+
+FIFO chronology is determined by `effective_date ASC`, then `transaction_id ASC`.
+
+Backdated inserts, edits and deletes require full recomputation.
+
+BUY cash amount defines original acquisition basis.
+
+BUY price does not calculate total lot basis.
+
+FEE and TAX do not modify F004 basis.
+
+Partial lot basis allocation uses exact proportional rational arithmetic with no intermediate financial rounding.
+
+Full disposal removes exactly the lot's original acquisition basis.
+
+SELL cash amount and SELL price do not alter acquisition basis allocation.
+
+Mixed-currency acquisition lots remain valid and their basis is reported separately by currency.
+
+Portfolio cost basis may aggregate Account-level results only per currency and only after separate Account-level FIFO reconstruction.
+
+Oversold or incomplete history produces explicit unmatched SELL quantity. No implicit acquisition lot or short basis is invented.
+
+Future BUYs do not retroactively match earlier unmatched SELLs.
+
+Closed long lots have zero remaining quantity and zero remaining basis.
+
+F004 does not define realised or unrealised P&L, fee-adjusted basis, tax basis, FX conversion, average-cost accounting, short-selling basis, corporate-action basis adjustments, bond redemption/amortization or persistence architecture.

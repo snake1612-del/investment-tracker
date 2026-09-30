@@ -13,6 +13,15 @@ from app.application.contracts import (
     UnitOfWork,
 )
 from app.domain.instruments import normalized_instrument_name
+from app.domain.portfolio.engine.fifo import (
+    AccountCostBasisSummary,
+    FifoReconstruction,
+    LotTransactionFact,
+    PortfolioCostBasisSummary,
+    aggregate_portfolio_summaries,
+    reconstruct_fifo_lots,
+    summarize_account,
+)
 from app.domain.portfolio.engine.positions import reconstruct_positions
 from app.domain.transactions import CanonicalTransaction, TransactionType, valid_currency_code
 
@@ -203,6 +212,53 @@ def _canonical_from_record(record: TransactionRecord) -> CanonicalTransaction:
         settlement_date=record.settlement_date,
         note=record.note,
     )
+
+
+def _lot_fact_from_record(record: TransactionRecord) -> LotTransactionFact:
+    """Explicit F004 boundary: only persisted identity and required canonical facts."""
+    return LotTransactionFact(
+        transaction_id=record.id,
+        account_id=record.account_id,
+        type=record.type,
+        instrument_id=record.instrument_id,
+        quantity=record.quantity,
+        cash_amount=record.cash_amount,
+        currency_code=record.currency_code,
+        effective_date=record.effective_date,
+    )
+
+
+def _account_fifo(uow: UnitOfWork, account_id: int) -> FifoReconstruction:
+    return reconstruct_fifo_lots(
+        map(_lot_fact_from_record, uow.transactions.list_for_account(account_id)),
+        account_id=account_id,
+    )
+
+
+def get_account_fifo(factory: UowFactory, account_id: int) -> FifoReconstruction:
+    """Internal read capability; no public rational-money contract or commit."""
+    with factory() as uow:
+        if uow.accounts.get(account_id) is None:
+            raise NotFound("Investment account not found")
+        return _account_fifo(uow, account_id)
+
+
+def get_account_cost_basis(
+    factory: UowFactory, account_id: int
+) -> tuple[AccountCostBasisSummary, ...]:
+    return summarize_account(get_account_fifo(factory, account_id))
+
+
+def get_portfolio_cost_basis(
+    factory: UowFactory, portfolio_id: int
+) -> tuple[PortfolioCostBasisSummary, ...]:
+    with factory() as uow:
+        if uow.portfolios.get(portfolio_id) is None:
+            raise NotFound("Portfolio not found")
+        accounts = uow.accounts.list_for_portfolio(portfolio_id)
+        return aggregate_portfolio_summaries(
+            summarize_account(_account_fifo(uow, account.id)) for account in accounts
+        )
 
 
 def get_account_positions(factory: UowFactory, account_id: int) -> list[PositionRecord]:

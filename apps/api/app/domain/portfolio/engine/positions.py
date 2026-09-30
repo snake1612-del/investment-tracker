@@ -4,6 +4,7 @@ from collections.abc import Iterable
 from datetime import date
 from decimal import Decimal
 
+from app.domain.portfolio.engine.exact import decimal_to_scaled_int, scaled_int_to_decimal
 from app.domain.transactions import CanonicalTransaction, TransactionType
 
 
@@ -16,29 +17,15 @@ def _quantity_units(quantity: Decimal) -> int:
     if not isinstance(quantity, Decimal) or not quantity.is_finite() or quantity < 0:
         raise PositionReconstructionError("Canonical quantity must be a finite magnitude")
 
-    parts = quantity.as_tuple()
-    exponent = parts.exponent
-    if not isinstance(exponent, int):
-        raise PositionReconstructionError("Canonical quantity has an invalid exponent")
-
-    coefficient = 0
-    for digit in parts.digits:
-        coefficient = coefficient * 10 + digit
-    shift = exponent + 12
-    if shift >= 0:
-        return coefficient * 10**shift
-
-    units, remainder = divmod(coefficient, 10 ** (-shift))
-    if remainder:
-        raise PositionReconstructionError("Canonical quantity exceeds scale 12")
-    return units
+    try:
+        return decimal_to_scaled_int(quantity, 12)
+    except ValueError as error:
+        raise PositionReconstructionError("Canonical quantity exceeds scale 12") from error
 
 
 def _decimal_from_units(units: int) -> Decimal:
     """Construct the exact result without consulting the ambient Decimal context."""
-    sign = int(units < 0)
-    digits = tuple(int(digit) for digit in str(abs(units)))
-    return Decimal((sign, digits, -12))
+    return scaled_int_to_decimal(units, 12)
 
 
 def reconstruct_positions(
