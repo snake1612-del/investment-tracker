@@ -584,3 +584,58 @@ SELL не зависит от reconstructed position как blocking validation 
 Decimal values, которые невозможно точно представить в утверждённой persistence precision, отклоняются вместо silent rounding.
 
 Decision F002 не расширяет persistence schema и не вводит instrument quotation, FX, cost basis, P&L, tax или settlement-accounting methodology.
+
+# Decision F003 — Position quantity reconstruction
+
+## Scope and source of truth
+
+An Account position quantity is derived from canonical Transaction history for one Account and one Instrument. It is recomputable, not an independent persisted accounting fact.
+
+For an explicit `as_of_date`, include only transactions whose `effective_date <= as_of_date`:
+
+```text
+position quantity = Σ BUY.quantity − Σ SELL.quantity
+```
+
+The quantity effect of every current canonical transaction type is:
+
+```text
+BUY        → +quantity
+SELL       → -quantity
+DEPOSIT    → 0
+WITHDRAWAL → 0
+DIVIDEND   → 0
+COUPON     → 0
+FEE        → 0
+TAX        → 0
+```
+
+Future transaction types require an explicit quantity-effect decision; they must not silently default to zero.
+
+`instrument_id` is the identity used for grouping. Instruments with the same name remain separate when their IDs differ.
+
+## Dates and ordering
+
+`effective_date` determines whether a transaction is included. Backdated transactions change the result for applicable evaluation dates regardless of when they were inserted.
+
+`settlement_date`, transaction ID, insertion order and the order of transactions on the same date do not determine quantity. No settled/unsettled position subsystem is introduced.
+
+## Exact arithmetic and malformed facts
+
+BUY and SELL require both `instrument_id` and `quantity` for reconstruction. Their absence is malformed canonical history and must fail explicitly, without skipping, treating the event as zero, or repairing it.
+
+Canonical quantity is converted exactly to integer units of `10^-12`; signed units are aggregated with arbitrary-precision integers and converted back to `Decimal` exactly. Neither conversion nor aggregation may depend on the ambient Decimal context, round, truncate, or quantize-to-fit. A quantity not exactly representable at scale 12 fails explicitly.
+
+A derived sum may have more significant digits than one `NUMERIC(28,12)` input. It is not persisted in that column.
+
+`price`, `cash_amount`, currency and FEE/TAX amounts do not affect position quantity.
+
+## Zero and negative results
+
+Zero is a valid financial result. A negative result is preserved without clamping, rejection, or warning. This decision does not establish short-selling accounting or classification.
+
+Reconstruction does not automatically correct incomplete or corrupt canonical history.
+
+## Deferred methodology
+
+This decision defines quantity only. It does not define lots, FIFO/LIFO, average cost or price, cost basis, realised or unrealised P&L, valuation, allocation, FX, performance, settlement accounting, corporate actions, or short-selling methodology.

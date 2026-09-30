@@ -36,6 +36,13 @@ class InstrumentRecord:
 
 
 @dataclass(frozen=True)
+class PositionRecord:
+    instrument_id: int
+    instrument_name: str
+    quantity: Decimal
+
+
+@dataclass(frozen=True)
 class TransactionRecord:
     id: int
     account_id: int

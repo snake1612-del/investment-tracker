@@ -1,17 +1,19 @@
 """Typed use-case functions for the first persistence vertical slice."""
 
 from collections.abc import Callable
-from datetime import date
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 from app.application.contracts import (
     AccountRecord,
     InstrumentRecord,
     PortfolioRecord,
+    PositionRecord,
     TransactionRecord,
     UnitOfWork,
 )
 from app.domain.instruments import normalized_instrument_name
+from app.domain.portfolio.engine.positions import reconstruct_positions
 from app.domain.transactions import CanonicalTransaction, TransactionType, valid_currency_code
 
 
@@ -25,6 +27,10 @@ class InvalidInput(ValueError):
 
 class PersistenceConflict(Exception):
     """A known persistence constraint was violated."""
+
+
+class PositionDataIntegrityError(RuntimeError):
+    """A reconstructed position cannot be enriched from canonical metadata."""
 
 
 UowFactory = Callable[[], UnitOfWork]
@@ -180,3 +186,42 @@ def list_account_transactions(factory: UowFactory, account_id: int) -> list[Tran
         if uow.accounts.get(account_id) is None:
             raise NotFound("Investment account not found")
         return uow.transactions.list_for_account(account_id)
+
+
+def _canonical_from_record(record: TransactionRecord) -> CanonicalTransaction:
+    """Map factual persisted history to the existing domain representation."""
+    return CanonicalTransaction(
+        account_id=record.account_id,
+        type=record.type,
+        cash_amount=record.cash_amount,
+        currency_code=record.currency_code,
+        effective_date=record.effective_date,
+        instrument_id=record.instrument_id,
+        related_transaction_id=record.related_transaction_id,
+        quantity=record.quantity,
+        price=record.price,
+        settlement_date=record.settlement_date,
+        note=record.note,
+    )
+
+
+def get_account_positions(factory: UowFactory, account_id: int) -> list[PositionRecord]:
+    """Read current UTC-date quantities without mutating canonical history."""
+    with factory() as uow:
+        if uow.accounts.get(account_id) is None:
+            raise NotFound("Investment account not found")
+        history = uow.transactions.list_for_account(account_id)
+        as_of_date = datetime.now(UTC).date()
+        quantities = reconstruct_positions(map(_canonical_from_record, history), as_of_date)
+        nonzero = {
+            instrument_id: quantity for instrument_id, quantity in quantities.items() if quantity
+        }
+        names = {instrument.id: instrument.name for instrument in uow.instruments.list()}
+        positions: list[PositionRecord] = []
+        for instrument_id in sorted(nonzero):
+            if instrument_id not in names:
+                raise PositionDataIntegrityError("Position Instrument metadata is missing")
+            positions.append(
+                PositionRecord(instrument_id, names[instrument_id], nonzero[instrument_id])
+            )
+        return positions

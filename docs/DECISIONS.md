@@ -2522,3 +2522,43 @@ Existing account transaction history becomes the read surface for DEPOSIT, BUY a
 No schema migration is expected. If existing physical Instrument-name capacity cannot support the approved 1..200 rule, implementation must stop for a new architecture/schema decision instead of silently changing persistence.
 
 Decision 010 adds no new financial methodology beyond Decisions F001/F002 and leaves portfolio calculations, richer instrument metadata, FEE/TAX creation and all other deferred areas unresolved.
+
+## Decision 011 — Account position quantity read slice
+
+**Decision**
+
+The next coherent feature slice records Decision F003 in `docs/CALCULATIONS.md` and implements pure Account position quantity reconstruction with one public endpoint:
+
+```text
+GET /accounts/{account_id}/positions
+```
+
+Position quantity follows Decision F003. The framework-independent domain calculation accepts canonical transactions and an explicit `as_of_date`, groups all Instruments in one pass, and does not read the system clock.
+
+For this current-position endpoint, the application determines the current UTC calendar date once per request and passes it to the domain. No Clock abstraction, public `as_of` query parameter, or historical endpoint is introduced.
+
+The read-only application use case checks Account existence, loads existing canonical transaction history through `TransactionRepository.list_for_account`, maps persistence-facing records to the domain's existing `CanonicalTransaction` representation, reconstructs quantities, omits zero results, preserves negative results, loads Instrument metadata once, and returns positions ordered by `instrument_id ASC`. It does not commit.
+
+Instrument ID is the position identity; name is display metadata. Missing metadata for a non-zero reconstructed position is an internal data-integrity error, not an empty name or silently omitted position.
+
+For an existing Account, the endpoint returns `200` and a list containing only:
+
+- `instrument_id`;
+- `instrument_name`;
+- `quantity` as an exact-value JSON decimal string.
+
+An Account with no non-zero positions returns `200` and `[]`. A missing Account returns `404`. Malformed canonical history is an internal error, not an input-validation `422`; raw infrastructure details are not exposed.
+
+Transaction history remains factual input, and the domain applies the `effective_date <= as_of_date` filter. No SQL position aggregation, date-filtered repository method, position repository, position table, snapshot, materialized view, cache, derived column, or migration is introduced.
+
+This slice does not add Portfolio positions, frontend UI, price or cash calculations, cost basis, P&L, market value, allocation, FX, performance, settlement accounting, short-selling classification, or FEE/TAX feature work.
+
+**Reason**
+
+Decisions F001/F002 and 008–010 establish canonical BUY/SELL facts and Instrument identity. Decision F003 now approves the minimal quantity methodology needed to reconstruct positions from those facts without inventing cost-basis, valuation, or short-selling rules.
+
+Keeping calculation in the domain and using the existing factual-history repository preserves the financial boundary and makes historical-date behavior testable even though the first public endpoint shows only the current UTC-date view.
+
+**Consequences**
+
+Account position quantities are computed on read from canonical history and can be recomputed after corrections. Zero positions are omitted from the public response; negative quantities remain visible unchanged. The endpoint reports quantities only, without implying valuation or a complete short-selling methodology. Existing schema and repository contracts remain unchanged.
