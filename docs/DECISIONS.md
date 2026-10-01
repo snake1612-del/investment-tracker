@@ -3189,3 +3189,238 @@ Portfolio realised P&L is aggregated only after independent Account reconstructi
 F005 remains recomputable from canonical transaction history and introduces no database schema change or derived-state persistence.
 
 A future product/API decision will be required before realised P&L is publicly exposed because rounding, exact rational wire representation and unresolved-state presentation remain intentionally undecided.
+
+## Decision 015 — Realised P&L public read contract
+
+**Decision**
+
+The Gross Realised P&L milestone will expose the F005 gross trade-cash realised P&L reconstruction through lossless Account and Portfolio read APIs.
+
+The public endpoints are:
+
+GET /accounts/{account_id}/realised-pnl
+
+GET /portfolios/{portfolio_id}/realised-pnl
+
+These endpoints expose only the metric defined by Decision F005:
+
+GROSS_TRADE_CASH_REALISED_PNL
+
+The response therefore includes that metric identifier explicitly and must not be interpreted as net, fee-adjusted, tax-adjusted or FX-converted realised P&L.
+
+### Exact monetary wire representation
+
+Every exact monetary value exposed by these endpoints uses a canonical rational representation:
+
+{
+  "currency_code": "USD",
+  "amount": {
+    "numerator": "100",
+    "denominator": "3"
+  }
+}
+
+The numerator and denominator are JSON strings representing base-10 integers.
+
+The wire representation is mathematical and does not depend on Python Fraction as a public implementation contract.
+
+Canonical rational rules are:
+
+denominator is strictly positive;
+numerator and denominator are reduced to lowest terms;
+the sign, if negative, appears only in numerator;
+zero is represented as 0/1;
+an integer N is represented as N/1.
+
+No floating-point or approximate Decimal value is exposed.
+
+The API does not expose rounded, formatted or display-oriented monetary amounts.
+
+Presentation rounding is deferred to a separate future policy.
+
+### Resolved P&L
+
+Resolved component detail is not exposed in the first public read contract.
+
+Instead, the response exposes exact resolved gross trade-cash realised P&L aggregated by currency:
+
+resolved_pnl_by_currency
+
+Each currency appears at most once and uses the canonical exact-money representation.
+
+Currencies are ordered by currency_code ascending.
+
+If resolved components exist in a currency and their exact subtotal is zero, that currency remains present as an exact 0/1 result.
+
+Currencies are never combined through implicit FX conversion.
+
+### Unresolved components
+
+Unresolved financial state remains explicit and is never represented as zero realised P&L.
+
+Public unresolved components form a discriminated union identified by:
+
+reason
+
+Supported F005 reasons are:
+
+CURRENCY_MISMATCH
+MISSING_ACQUISITION_BASIS
+
+Every unresolved component contains enough source context to explain the incomplete result:
+
+account_id
+sell_transaction_id
+instrument_id
+instrument_name
+effective_date
+quantity
+allocated_proceeds
+reason
+
+quantity remains an exact decimal string using the existing API quantity representation.
+
+A CURRENCY_MISMATCH component additionally contains:
+
+removed_basis
+
+as exact money.
+
+It does not contain numeric realised P&L because subtraction across currencies is undefined without an FX methodology.
+
+A MISSING_ACQUISITION_BASIS component does not contain removed_basis or numeric realised P&L.
+
+Missing financial values are therefore represented structurally by the discriminated result shape rather than by ambiguous nullable monetary fields.
+
+### Identity and metadata
+
+account_id, sell_transaction_id and instrument_id are canonical source identifiers.
+
+instrument_name is display metadata and is not used as financial identity.
+
+The API does not expose source BUY transaction IDs in this summary contract.
+
+A future disposal-detail capability may expose deeper lot/match provenance if product requirements justify it.
+
+### Account response
+
+GET /accounts/{account_id}/realised-pnl returns conceptually:
+
+metric
+resolved_pnl_by_currency
+unresolved_components
+is_fully_resolved
+
+is_fully_resolved is true exactly when the result contains no unresolved components.
+
+A valid Account with no realised SELL activity returns HTTP 200 with empty resolved and unresolved collections and is_fully_resolved = true.
+
+### Portfolio response
+
+GET /portfolios/{portfolio_id}/realised-pnl uses the same top-level contract.
+
+Portfolio resolved P&L is aggregated only after independent Account-level F004/F005 reconstruction and only within the same currency.
+
+Unresolved components retain their account_id so Account-boundary provenance is never lost during Portfolio aggregation.
+
+The Portfolio endpoint does not expose a synthetic cross-currency total.
+
+### Ordering
+
+Public output is deterministic.
+
+Resolved currency subtotals are ordered by currency_code ascending.
+
+Unresolved components are ordered primarily by SELL effective date and SELL transaction identity, while multiple components of the same SELL preserve deterministic reconstruction order.
+
+Ordering is presentation behavior and does not alter F004/F005 financial semantics.
+
+### Error and unresolved semantics
+
+A missing Account or Portfolio uses the existing HTTP 404 behavior.
+
+A valid financial result containing unresolved F005 components remains HTTP 200.
+
+CURRENCY_MISMATCH and MISSING_ACQUISITION_BASIS are valid financial states, not transport or validation errors.
+
+Malformed canonical history or violated F004/F005 reconstruction invariants remain internal failures and are not reported as HTTP 422 errors for the read request.
+
+### Application orchestration
+
+The API layer does not perform financial reconstruction or rational arithmetic.
+
+Account reads reuse the existing one-history-load reconstruction path:
+
+canonical Account history
+→ LotTransactionFact mapping
+→ F004 FIFO
+→ F005 reconstruction
+→ Account summary
+→ API mapping
+
+Portfolio reads continue to reconstruct each Account independently before Portfolio aggregation.
+
+The API must not reload or recompute F004/F005 merely to produce its wire representation.
+
+Instrument metadata is loaded in a bounded operation and mapped by canonical instrument_id; per-component database lookups are not introduced.
+
+### Persistence
+
+Realised P&L remains computed derived state.
+
+Decision 015 introduces:
+
+no P&L table
+no materialized view
+no API snapshot
+no cache
+no database migration
+
+Canonical transaction history remains the persisted source of truth.
+
+### Testing
+
+The public API must be tested for:
+
+empty results;
+exact profit;
+exact loss;
+exact zero;
+repeating rational values;
+multiple currencies;
+currency mismatch;
+missing acquisition basis;
+partially resolved results;
+Account isolation;
+Portfolio aggregation;
+missing resources;
+canonical rational JSON representation;
+absence of monetary rounding.
+
+Existing F003, F004 and F005 financial-engine, golden/reference and PostgreSQL tests must remain green.
+
+**Reason**
+
+The existing F005 implementation produces exact and financially honest internal results but does not yet provide an externally usable product capability.
+
+A public read contract must preserve exact rational monetary values and explicit unresolved financial states without inventing presentation rounding or FX methodology.
+
+Representing money as a canonical numerator/denominator rational plus currency is lossless, language-independent and does not require clients to accept binary floating-point or finite Decimal approximations.
+
+Publishing only resolved currency summaries plus unresolved component detail provides the minimum useful product contract without exposing every internal FIFO or realised-match structure.
+
+**Consequences**
+
+API clients can retrieve exact Account and Portfolio gross trade-cash realised P&L.
+
+Clients must support arbitrary-size rational monetary values rather than assuming JSON numeric money.
+
+Resolved P&L remains partitioned by currency.
+
+Unresolved missing-basis and currency-mismatch states remain visible and cannot be mistaken for zero P&L.
+
+The API intentionally provides no display rounding and no cross-currency Portfolio total.
+
+Detailed resolved disposal/match audit APIs remain deferred.
+
+The milestone remains fully computed on read and introduces no persistence or migration changes.

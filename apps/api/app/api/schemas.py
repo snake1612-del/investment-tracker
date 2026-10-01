@@ -1,16 +1,20 @@
 """HTTP-only request and response shapes for the persistence slice."""
 
 from datetime import date, datetime
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.application.contracts import (
     AccountRecord,
     InstrumentRecord,
     PortfolioRecord,
     PositionRecord,
+    RealisedPnlReadRecord,
     TransactionRecord,
 )
+from app.domain.portfolio.engine.fifo import ExactMoney
+from app.domain.portfolio.engine.realised_pnl import RealisedMatch
 
 
 class PortfolioCreate(BaseModel):
@@ -128,4 +132,101 @@ class PositionRead(BaseModel):
             instrument_id=record.instrument_id,
             instrument_name=record.instrument_name,
             quantity=str(record.quantity),
+        )
+
+
+class RationalAmountRead(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    numerator: Annotated[str, Field(strict=True, pattern=r"^(0|-?[1-9][0-9]*)$")]
+    denominator: Annotated[str, Field(strict=True, pattern=r"^[1-9][0-9]*$")]
+
+
+class ExactMoneyRead(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    currency_code: str
+    amount: RationalAmountRead
+
+    @classmethod
+    def from_money(cls, money: ExactMoney) -> ExactMoneyRead:
+        # The exact value already has reduced terms, positive denominator and canonical zero.
+        return cls(
+            currency_code=money.currency_code,
+            amount=RationalAmountRead(
+                numerator=str(money.amount.numerator), denominator=str(money.amount.denominator)
+            ),
+        )
+
+
+class UnresolvedPnlRead(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    account_id: int
+    sell_transaction_id: int
+    instrument_id: int
+    instrument_name: str
+    effective_date: date
+    quantity: str
+    allocated_proceeds: ExactMoneyRead
+
+
+class CurrencyMismatchRead(UnresolvedPnlRead):
+    reason: Literal["CURRENCY_MISMATCH"] = "CURRENCY_MISMATCH"
+    removed_basis: ExactMoneyRead
+
+
+class MissingAcquisitionBasisRead(UnresolvedPnlRead):
+    reason: Literal["MISSING_ACQUISITION_BASIS"] = "MISSING_ACQUISITION_BASIS"
+
+
+type UnresolvedPnlComponentRead = Annotated[
+    CurrencyMismatchRead | MissingAcquisitionBasisRead, Field(discriminator="reason")
+]
+
+
+class RealisedPnlRead(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    metric: Literal["GROSS_TRADE_CASH_REALISED_PNL"] = "GROSS_TRADE_CASH_REALISED_PNL"
+    resolved_pnl_by_currency: list[ExactMoneyRead]
+    unresolved_components: list[UnresolvedPnlComponentRead]
+    is_fully_resolved: bool
+
+    @classmethod
+    def from_record(cls, record: RealisedPnlReadRecord) -> RealisedPnlRead:
+        unresolved: list[UnresolvedPnlComponentRead] = []
+        for item in record.unresolved_components:
+            component = item.component
+            if isinstance(component, RealisedMatch):
+                unresolved.append(
+                    CurrencyMismatchRead(
+                        account_id=item.account_id,
+                        sell_transaction_id=component.source_sell_transaction_id,
+                        instrument_id=component.instrument_id,
+                        instrument_name=item.instrument_name,
+                        effective_date=item.effective_date,
+                        quantity=str(component.matched_quantity),
+                        allocated_proceeds=ExactMoneyRead.from_money(component.allocated_proceeds),
+                        removed_basis=ExactMoneyRead.from_money(component.removed_basis),
+                    )
+                )
+            else:
+                unresolved.append(
+                    MissingAcquisitionBasisRead(
+                        account_id=item.account_id,
+                        sell_transaction_id=component.source_sell_transaction_id,
+                        instrument_id=component.instrument_id,
+                        instrument_name=item.instrument_name,
+                        effective_date=item.effective_date,
+                        quantity=str(component.unmatched_quantity),
+                        allocated_proceeds=ExactMoneyRead.from_money(component.allocated_proceeds),
+                    )
+                )
+        return cls(
+            resolved_pnl_by_currency=[
+                ExactMoneyRead.from_money(money) for money in record.resolved_pnl_by_currency
+            ],
+            unresolved_components=unresolved,
+            is_fully_resolved=record.is_fully_resolved,
         )

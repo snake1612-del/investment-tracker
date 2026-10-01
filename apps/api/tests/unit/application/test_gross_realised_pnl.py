@@ -8,13 +8,15 @@ from typing import cast
 import pytest
 
 from app.application import use_cases
-from app.application.contracts import AccountRecord, TransactionRecord
+from app.application.contracts import AccountRecord, InstrumentRecord, TransactionRecord
 from app.application.use_cases import (
     NotFound,
     UowFactory,
     get_account_gross_realised_pnl,
     get_account_gross_realised_pnl_summary,
+    get_account_realised_pnl_read,
     get_portfolio_gross_realised_pnl_summary,
+    get_portfolio_realised_pnl_read,
 )
 from app.domain.portfolio.engine.fifo import FifoReconstruction, LotTransactionFact
 from app.domain.portfolio.engine.realised_pnl import GrossRealisedPnlReconstruction
@@ -47,6 +49,8 @@ class FakeUow:
         self.histories = histories
         self.reads: list[int] = []
         self.commits = 0
+        self.metadata_reads = 0
+        self.names = {1: "Share"}
         self.accounts = SimpleNamespace(
             get=lambda id_: AccountRecord(id_, 1, "Broker", NOW, NOW) if exists else None,
             list_for_portfolio=lambda id_: [
@@ -55,6 +59,11 @@ class FakeUow:
         )
         self.portfolios = SimpleNamespace(get=lambda id_: object() if exists else None)
         self.transactions = SimpleNamespace(list_for_account=self.read)
+        self.instruments = SimpleNamespace(list=self.metadata)
+
+    def metadata(self) -> list[InstrumentRecord]:
+        self.metadata_reads += 1
+        return [InstrumentRecord(id_, name, NOW, NOW) for id_, name in self.names.items()]
 
     def read(self, account_id: int) -> list[TransactionRecord]:
         self.reads.append(account_id)
@@ -85,6 +94,8 @@ def factory(fake: FakeUow) -> UowFactory:
         get_account_gross_realised_pnl,
         get_account_gross_realised_pnl_summary,
         get_portfolio_gross_realised_pnl_summary,
+        get_account_realised_pnl_read,
+        get_portfolio_realised_pnl_read,
     ],
 )
 def test_missing_entity_stops_without_history_load_or_commit(
@@ -95,6 +106,7 @@ def test_missing_entity_stops_without_history_load_or_commit(
         capability(factory(fake), 1)
     assert fake.reads == []
     assert fake.commits == 0
+    assert fake.metadata_reads == 0
 
 
 def test_account_empty_history_preserves_identity_and_completeness() -> None:
@@ -107,9 +119,11 @@ def test_account_empty_history_preserves_identity_and_completeness() -> None:
 
 
 @pytest.mark.parametrize("portfolio", [False, True])
+@pytest.mark.parametrize("public_read", [False, True])
 def test_history_and_mapping_once_fifo_once_f005_once_same_tuple(
     monkeypatch: pytest.MonkeyPatch,
     portfolio: bool,
+    public_read: bool,
 ) -> None:
     fake = FakeUow({1: [record(1, 1, TransactionType.BUY), record(2, 1, TransactionType.SELL)]})
     if portfolio:
@@ -152,7 +166,37 @@ def test_history_and_mapping_once_fifo_once_f005_once_same_tuple(
         result = get_account_gross_realised_pnl_summary(factory(fake), 1)
         assert result.is_fully_resolved
     assert result.resolved_pnl_by_currency["USD"].amount == Fraction(50)
+    # Reset spies before exercising the public read orchestration independently.
+    if public_read:
+        fake.reads.clear()
+        mapping_calls.clear()
+        fifo_calls.clear()
+        pnl_calls.clear()
+        read = (
+            get_portfolio_realised_pnl_read(factory(fake), 1)
+            if portfolio
+            else get_account_realised_pnl_read(factory(fake), 1)
+        )
+        assert read.resolved_pnl_by_currency[0].amount == Fraction(50)
+        assert read.is_fully_resolved is (not portfolio)
+        if portfolio:
+            assert read.unresolved_components[0].account_id == 2
+            assert read.unresolved_components[0].instrument_name == "Share"
+            assert read.unresolved_components[0].effective_date == date(2020, 1, 1)
+        assert fake.metadata_reads == 1
     expected = [1, 2] if portfolio else [1]
     assert fake.reads == pnl_calls == expected
     assert mapping_calls == ([1, 2, 3] if portfolio else [1, 2])
+    assert fake.commits == 0
+
+
+@pytest.mark.parametrize("portfolio", [False, True])
+def test_public_read_missing_metadata_is_internal_failure(portfolio: bool) -> None:
+    fake = FakeUow({1: [record(1, 1, TransactionType.SELL)]})
+    fake.names = {}
+    capability = get_portfolio_realised_pnl_read if portfolio else get_account_realised_pnl_read
+    with pytest.raises(use_cases.RealisedPnlDataIntegrityError):
+        capability(factory(fake), 1)
+    assert fake.reads == [1]
+    assert fake.metadata_reads == 1
     assert fake.commits == 0

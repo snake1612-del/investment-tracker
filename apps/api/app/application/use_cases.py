@@ -1,6 +1,6 @@
 """Typed use-case functions for the first persistence vertical slice."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, date, datetime
 from decimal import Decimal
 
@@ -9,12 +9,15 @@ from app.application.contracts import (
     InstrumentRecord,
     PortfolioRecord,
     PositionRecord,
+    RealisedPnlReadRecord,
     TransactionRecord,
     UnitOfWork,
+    UnresolvedPnlRecord,
 )
 from app.domain.instruments import normalized_instrument_name
 from app.domain.portfolio.engine.fifo import (
     AccountCostBasisSummary,
+    ExactMoney,
     FifoReconstruction,
     LotTransactionFact,
     PortfolioCostBasisSummary,
@@ -48,6 +51,10 @@ class PersistenceConflict(Exception):
 
 class PositionDataIntegrityError(RuntimeError):
     """A reconstructed position cannot be enriched from canonical metadata."""
+
+
+class RealisedPnlDataIntegrityError(RuntimeError):
+    """A reconstructed P&L component lacks canonical source metadata."""
 
 
 UowFactory = Callable[[], UnitOfWork]
@@ -285,6 +292,66 @@ def get_account_fifo(factory: UowFactory, account_id: int) -> FifoReconstruction
         if uow.accounts.get(account_id) is None:
             raise NotFound("Investment account not found")
         return _account_fifo(uow, account_id)
+
+
+def get_account_realised_pnl_read(factory: UowFactory, account_id: int) -> RealisedPnlReadRecord:
+    with factory() as uow:
+        if uow.accounts.get(account_id) is None:
+            raise NotFound("Investment account not found")
+        reconstruction = _account_gross_realised_pnl(uow, account_id)
+        summary = summarize_account_gross_realised_pnl(reconstruction)
+        return _realised_pnl_read_record(uow, (reconstruction,), summary.resolved_pnl_by_currency)
+
+
+def get_portfolio_realised_pnl_read(
+    factory: UowFactory, portfolio_id: int
+) -> RealisedPnlReadRecord:
+    with factory() as uow:
+        if uow.portfolios.get(portfolio_id) is None:
+            raise NotFound("Portfolio not found")
+        reconstructions = tuple(
+            _account_gross_realised_pnl(uow, account.id)
+            for account in uow.accounts.list_for_portfolio(portfolio_id)
+        )
+        summary = aggregate_portfolio_gross_realised_pnl(
+            summarize_account_gross_realised_pnl(reconstruction)
+            for reconstruction in reconstructions
+        )
+        return _realised_pnl_read_record(uow, reconstructions, summary.resolved_pnl_by_currency)
+
+
+def _realised_pnl_read_record(
+    uow: UnitOfWork,
+    reconstructions: Sequence[GrossRealisedPnlReconstruction],
+    resolved: Mapping[str, ExactMoney],
+) -> RealisedPnlReadRecord:
+    """Enrich the already computed result; no history reload or reconstruction."""
+    names = {instrument.id: instrument.name for instrument in uow.instruments.list()}
+    unresolved: list[UnresolvedPnlRecord] = []
+    for reconstruction in reconstructions:
+        if reconstruction.account_id is None:
+            raise RealisedPnlDataIntegrityError("Missing reconstruction Account identity")
+        for sell in reconstruction.sells:
+            for component in sell.unresolved_components:
+                if component.instrument_id not in names:
+                    raise RealisedPnlDataIntegrityError(
+                        "Realised P&L Instrument metadata is missing"
+                    )
+                unresolved.append(
+                    UnresolvedPnlRecord(
+                        reconstruction.account_id,
+                        names[component.instrument_id],
+                        sell.effective_date,
+                        component,
+                    )
+                )
+    # Stable sorting preserves match order, followed by unmatched proceeds, within a SELL.
+    unresolved.sort(
+        key=lambda item: (item.effective_date, item.component.source_sell_transaction_id)
+    )
+    return RealisedPnlReadRecord(
+        tuple(resolved[currency] for currency in sorted(resolved)), tuple(unresolved)
+    )
 
 
 def get_account_cost_basis(

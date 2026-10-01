@@ -2,8 +2,13 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, status
 
-from app.api.schemas import PortfolioCreate, PortfolioRead, PositionRead
-from app.application.use_cases import UowFactory, create_portfolio, get_portfolio_positions
+from app.api.schemas import PortfolioCreate, PortfolioRead, PositionRead, RealisedPnlRead
+from app.application.use_cases import (
+    UowFactory,
+    create_portfolio,
+    get_portfolio_positions,
+    get_portfolio_realised_pnl_read,
+)
 from app.bootstrap import get_uow_factory
 
 router = APIRouter()
@@ -24,3 +29,10 @@ def get_positions(
         PositionRead.from_record(record)
         for record in get_portfolio_positions(factory, portfolio_id)
     ]
+
+
+@router.get("/portfolios/{portfolio_id}/realised-pnl", response_model=RealisedPnlRead)
+def get_realised_pnl(
+    portfolio_id: int, factory: Annotated[UowFactory, Depends(get_uow_factory)]
+) -> RealisedPnlRead:
+    return RealisedPnlRead.from_record(get_portfolio_realised_pnl_read(factory, portfolio_id))
