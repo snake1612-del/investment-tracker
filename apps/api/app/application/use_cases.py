@@ -23,6 +23,14 @@ from app.domain.portfolio.engine.fifo import (
     summarize_account,
 )
 from app.domain.portfolio.engine.positions import reconstruct_positions
+from app.domain.portfolio.engine.realised_pnl import (
+    AccountGrossRealisedPnlSummary,
+    GrossRealisedPnlReconstruction,
+    PortfolioGrossRealisedPnlSummary,
+    aggregate_portfolio_gross_realised_pnl,
+    reconstruct_gross_realised_pnl,
+    summarize_account_gross_realised_pnl,
+)
 from app.domain.transactions import CanonicalTransaction, TransactionType, valid_currency_code
 
 
@@ -229,10 +237,46 @@ def _lot_fact_from_record(record: TransactionRecord) -> LotTransactionFact:
 
 
 def _account_fifo(uow: UnitOfWork, account_id: int) -> FifoReconstruction:
-    return reconstruct_fifo_lots(
-        map(_lot_fact_from_record, uow.transactions.list_for_account(account_id)),
-        account_id=account_id,
-    )
+    return _load_account_fifo_context(uow, account_id)[1]
+
+
+def _load_account_fifo_context(
+    uow: UnitOfWork, account_id: int
+) -> tuple[tuple[LotTransactionFact, ...], FifoReconstruction]:
+    facts = tuple(map(_lot_fact_from_record, uow.transactions.list_for_account(account_id)))
+    return facts, reconstruct_fifo_lots(facts, account_id=account_id)
+
+
+def _account_gross_realised_pnl(uow: UnitOfWork, account_id: int) -> GrossRealisedPnlReconstruction:
+    facts, fifo = _load_account_fifo_context(uow, account_id)
+    return reconstruct_gross_realised_pnl(fifo, facts)
+
+
+def get_account_gross_realised_pnl(
+    factory: UowFactory, account_id: int
+) -> GrossRealisedPnlReconstruction:
+    with factory() as uow:
+        if uow.accounts.get(account_id) is None:
+            raise NotFound("Investment account not found")
+        return _account_gross_realised_pnl(uow, account_id)
+
+
+def get_account_gross_realised_pnl_summary(
+    factory: UowFactory, account_id: int
+) -> AccountGrossRealisedPnlSummary:
+    return summarize_account_gross_realised_pnl(get_account_gross_realised_pnl(factory, account_id))
+
+
+def get_portfolio_gross_realised_pnl_summary(
+    factory: UowFactory, portfolio_id: int
+) -> PortfolioGrossRealisedPnlSummary:
+    with factory() as uow:
+        if uow.portfolios.get(portfolio_id) is None:
+            raise NotFound("Portfolio not found")
+        return aggregate_portfolio_gross_realised_pnl(
+            summarize_account_gross_realised_pnl(_account_gross_realised_pnl(uow, account.id))
+            for account in uow.accounts.list_for_portfolio(portfolio_id)
+        )
 
 
 def get_account_fifo(factory: UowFactory, account_id: int) -> FifoReconstruction:

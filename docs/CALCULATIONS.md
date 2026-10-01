@@ -834,3 +834,213 @@ Future BUYs do not retroactively match earlier unmatched SELLs.
 Closed long lots have zero remaining quantity and zero remaining basis.
 
 F004 does not define realised or unrealised P&L, fee-adjusted basis, tax basis, FX conversion, average-cost accounting, short-selling basis, corporate-action basis adjustments, bond redemption/amortization or persistence architecture.
+
+# Decision F005 — Gross trade-cash realised P&L reconstruction
+
+## Decision
+
+Canonical transaction history remains the financial source of truth.
+
+F004 FIFO DisposalMatches remain the authoritative derived long-lot assignment used for realised-P&L reconstruction.
+
+Decision F005 defines gross trade-cash realised P&L.
+
+The term "gross trade-cash" is intentional:
+
+- canonical BUY and SELL cash legs are used directly;
+- FEE is excluded;
+- TAX is excluded;
+- no FX conversion is performed.
+
+For a canonical SELL, authoritative total realised proceeds are `SELL.cash_amount` in `SELL.currency_code`.
+
+`SELL.quantity`, `SELL.price` and `SELL.cash_amount` remain independent factual values.
+
+`SELL.cash_amount` MUST NOT be silently replaced by `SELL.quantity × SELL.price`.
+
+`SELL.price` remains factual unit-price information but does not determine total realised proceeds and does not determine proceeds allocation between FIFO matches.
+
+For a SELL with total quantity `Q` and cash amount `P`, proceeds attributable to a matched or unmatched quantity `q` are:
+
+`P × q / Q`.
+
+This allocation MUST be mathematically exact.
+
+Every F004 DisposalMatch receives proceeds proportional to its matched quantity.
+
+Any F004 unmatched SELL quantity receives a corresponding proportional factual proceeds component.
+
+For every SELL:
+
+`SELL.cash_amount = sum(match allocated proceeds) + unmatched allocated proceeds`
+
+mathematically exactly.
+
+If the SELL is fully matched:
+
+`SELL.cash_amount = sum(all DisposalMatch allocated proceeds)`
+
+exactly.
+
+Proportional proceeds allocation MUST NOT silently round to currency minor units, canonical cash scale, Decimal context precision or any other presentation precision.
+
+Binary floating-point arithmetic MUST NOT be used.
+
+Derived proceeds allocation may therefore be an exact rational value.
+
+For one DisposalMatch, gross trade-cash realised P&L is defined only when the allocated SELL proceeds currency equals the removed acquisition-basis currency.
+
+When currencies are equal:
+
+`gross trade-cash realised P&L = allocated SELL proceeds - removed acquisition basis`.
+
+The result is an exact monetary amount in that currency.
+
+Positive values are profits.
+
+Negative values are losses.
+
+Zero is a valid realised-P&L result.
+
+Results MUST NOT be clamped.
+
+When the allocated SELL proceeds currency differs from the removed acquisition-basis currency, numeric realised P&L for that DisposalMatch is unresolved.
+
+The engine MUST preserve both monetary components and their currencies.
+
+It MUST NOT subtract monetary amounts denominated in different currencies and MUST NOT invent an FX conversion.
+
+Cross-currency unresolved state does not invalidate other resolved DisposalMatches.
+
+A single SELL may therefore contain both resolved and unresolved realised-P&L components.
+
+If F004 reports unmatched SELL quantity, F005 allocates factual SELL proceeds to that unmatched quantity proportionally.
+
+The acquisition basis for unmatched quantity remains unresolved.
+
+Gross realised P&L for unmatched quantity also remains unresolved.
+
+The engine MUST NOT assign zero acquisition basis, fabricate an implicit BUY or invent short-position basis.
+
+A SELL-only history therefore has factual SELL proceeds but unresolved acquisition basis and unresolved realised P&L.
+
+F005 distinguishes at least two financially different unresolved conditions:
+
+1. missing acquisition basis because SELL quantity is unmatched under supported long-lot history;
+2. basis/proceeds currency mismatch requiring future FX methodology.
+
+These conditions MUST NOT be treated as equivalent to zero P&L.
+
+Resolved factual components remain usable even when another component of the same SELL is unresolved.
+
+FEE does not affect F005 gross trade-cash realised P&L.
+
+BUY-linked FEE does not modify the F004 acquisition basis used by F005.
+
+SELL-linked FEE does not reduce F005 SELL proceeds.
+
+Multiple, linked, unlinked or cross-currency FEE transactions remain separate canonical financial events.
+
+Fee-adjusted and net realised-P&L methodology is deferred.
+
+TAX does not affect F005 gross trade-cash realised P&L.
+
+Tax basis, tax liability and tax-adjusted P&L remain deferred.
+
+Realised-P&L reconstruction inherits the F004 Account and Instrument matching boundaries.
+
+A SELL in one InvestmentAccount MUST NOT use acquisition basis from another InvestmentAccount.
+
+Portfolio aggregation occurs only after Account-level reconstruction.
+
+Resolved realised P&L may be summed only within the same currency.
+
+Multi-currency results remain partitioned by currency.
+
+A Portfolio or Account containing unresolved components may still expose its resolved P&L components, but those resolved values MUST NOT be represented as a complete total while unresolved components remain.
+
+The realised event date is `SELL.effective_date`.
+
+`settlement_date` does not determine F005 realised-P&L recognition.
+
+Backdated BUY or SELL insertion, transaction edits and transaction deletion require deterministic recomputation from current canonical history and current F004 matching.
+
+F005 does not create an immutable derived-P&L ledger.
+
+Exact arithmetic applies throughout F005.
+
+Canonical SELL cash amount is exact.
+
+Proportional proceeds allocation is exact.
+
+F004 removed acquisition basis remains exact.
+
+Same-currency subtraction producing realised P&L is exact.
+
+No binary float, silent monetary rounding or display rounding is part of the financial methodology.
+
+F005 is valid only where F004 long-position FIFO matching is valid.
+
+Corporate actions, transfers, mergers, conversions, redemption and amortization require separate future methodology.
+
+No additional bond clean-price, dirty-price or accrued-interest methodology is required for F005 because realised proceeds and acquisition basis use factual canonical BUY/SELL cash legs.
+
+Bond redemption and amortization remain deferred.
+
+## Reason
+
+Canonical SELL already contains the factual monetary proceeds required for realised-P&L reconstruction, while F004 provides deterministic FIFO assignment and exact removed acquisition basis.
+
+Using `SELL.cash_amount` preserves the approved canonical rule that quantity, price and cash amount are independent facts and prevents F005 from replacing factual proceeds with `quantity × price`.
+
+Proportional allocation by SELL quantity is necessary when one SELL spans multiple acquisition lots or includes unmatched quantity.
+
+Exact rational allocation avoids cumulative rounding drift and ensures that allocated proceeds conserve the original canonical SELL cash amount exactly.
+
+Calculating realised P&L at the DisposalMatch level preserves the economic relationship between a particular disposal and its removed acquisition basis and allows higher-level SELL, Account and Portfolio aggregation afterward.
+
+A numeric P&L cannot be defined by directly subtracting amounts in different currencies. Preserving such matches as unresolved retains all known factual data without introducing an FX methodology.
+
+Likewise, unmatched SELL quantity has known factual proceeds but unknown supported long acquisition basis. Preserving it as unresolved avoids fabricating zero basis or short-selling methodology.
+
+Allowing partially resolved SELLs preserves useful same-currency P&L even when another component requires FX or has missing acquisition history.
+
+Excluding FEE and TAX keeps F005 focused on gross trade-cash realised P&L and avoids prematurely coupling the milestone to fee allocation, FX, tax basis or net-P&L methodology.
+
+## Consequences
+
+The financial domain may reconstruct gross long-position trade-cash realised P&L from canonical SELL transactions and F004 FIFO DisposalMatches.
+
+SELL cash amount is authoritative proceeds.
+
+SELL price does not determine proceeds.
+
+SELL proceeds are allocated exactly and proportionally by quantity across all matched and unmatched SELL components.
+
+The total allocated proceeds of every SELL equal its canonical cash amount exactly.
+
+Each same-currency DisposalMatch produces exact gross trade-cash realised P&L:
+
+`allocated proceeds - removed acquisition basis`.
+
+Cross-currency matches preserve allocated proceeds and acquisition basis but have unresolved numeric P&L until FX methodology exists.
+
+Unmatched SELL components preserve factual proceeds but have unresolved acquisition basis and unresolved P&L.
+
+A single SELL may be partially resolved.
+
+Resolved values remain usable and aggregate by currency.
+
+Unresolved components remain explicitly represented and are never treated as zero.
+
+FEE and TAX do not affect F005 P&L.
+
+Account boundaries remain strict.
+
+Portfolio aggregation occurs after Account-level reconstruction and remains currency-partitioned.
+
+Realised P&L is dated by SELL effective date.
+
+Backdated canonical mutations trigger full deterministic recomputation.
+
+F005 does not define unrealised P&L, valuation, FX conversion, fee-adjusted/net P&L, tax accounting, short-selling P&L, corporate actions, bond redemption/amortization or persistence architecture.
