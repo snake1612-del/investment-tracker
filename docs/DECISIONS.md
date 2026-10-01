@@ -3424,3 +3424,27 @@ The API intentionally provides no display rounding and no cross-currency Portfol
 Detailed resolved disposal/match audit APIs remain deferred.
 
 The milestone remains fully computed on read and introduces no persistence or migration changes.
+
+## Decision 016 — MVP v0.1 re-baseline
+
+**Decision**
+
+The first usable MVP is a single-user personal manual investment journal. Its immediate scope is defined in `PRODUCT.md` and must expose supported journal workflows through the web, not only API clients.
+
+The approved F001–F005 financial foundation and current modular-monolith architecture are retained, including canonical history, independent quantity/price/cash facts, exact arithmetic, Account isolation, explicit unresolved states, no implicit FX and lossless rational public money. Derived financial state remains computed from canonical history; new caches, snapshots or materialized state require a concrete need.
+
+Productisation now has priority over adding another financial engine. Corrections of supported manual journal events are required before regular journal use. Operational backup/restore is required before regular real-data use, and an appropriate access-control boundary before untrusted/public deployment.
+
+Valuation, performance and benchmark comparison remain future product capabilities, not blockers for the first usable v0.1. This explicitly updates the original broad MVP and the immediate-release interpretation of Decision 002; performance/benchmark remain part of the long-term core value.
+
+Milestones are defined by user-visible product capability rather than internal foundation completion. The next product milestone is Manual Portfolio Workspace: “Investment Tracker can now let its owner record trades and inspect holdings and realised results in the browser.”
+
+Specialised Finance/Architecture decisions are required only when their durable financial-semantic or architectural-boundary domain changes. Ordinary implementation details remain Development's responsibility under the Process v2 guidance in `AGENTS.md`.
+
+**Reason**
+
+The existing backend can already reconstruct supported quantities and gross realised results correctly, but those capabilities are not yet available through a usable browser workflow. A narrower release converts this foundation into user value without redesigning it.
+
+**Consequences**
+
+`PRODUCT.md` separates MVP v0.1, SOON AFTER and LATER; README describes actual implemented status rather than the complete target. Decisions 001–015 remain historical records, and F001–F005 methodology is unchanged. Process v2 uses one final complete-capability review by default and one coherent PR per meaningful capability, with focused re-review only for actual blockers.

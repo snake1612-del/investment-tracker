@@ -6,7 +6,7 @@ services:
       POSTGRES_USER: investment_tracker
       POSTGRES_PASSWORD: local_development_only
     ports:
-      - "5432:5432"
+      - "127.0.0.1:55432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql
     healthcheck:
