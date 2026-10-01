@@ -34,6 +34,11 @@ class ExactMoney:
             raise ValueError("Cannot add basis in different currencies")
         return ExactMoney(self.amount + other.amount, self.currency_code)
 
+    def __sub__(self, other: ExactMoney) -> ExactMoney:
+        if self.currency_code != other.currency_code:
+            raise ValueError("Cannot subtract money in different currencies")
+        return ExactMoney(self.amount - other.amount, self.currency_code)
+
     def allocated(self, quantity_units: int, original_units: int) -> ExactMoney:
         return ExactMoney(
             self.amount * Fraction(quantity_units, original_units), self.currency_code

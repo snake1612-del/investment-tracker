@@ -6,6 +6,8 @@ from decimal import Decimal
 from types import TracebackType
 from typing import Protocol, Self
 
+from app.domain.portfolio.engine.fifo import ExactMoney
+from app.domain.portfolio.engine.realised_pnl import UnresolvedComponent
 from app.domain.transactions import CanonicalTransaction, TransactionType
 
 
@@ -40,6 +42,24 @@ class PositionRecord:
     instrument_id: int
     instrument_name: str
     quantity: Decimal
+
+
+@dataclass(frozen=True)
+class UnresolvedPnlRecord:
+    account_id: int
+    instrument_name: str
+    effective_date: date
+    component: UnresolvedComponent
+
+
+@dataclass(frozen=True)
+class RealisedPnlReadRecord:
+    resolved_pnl_by_currency: tuple[ExactMoney, ...]
+    unresolved_components: tuple[UnresolvedPnlRecord, ...]
+
+    @property
+    def is_fully_resolved(self) -> bool:
+        return not self.unresolved_components
 
 
 @dataclass(frozen=True)
