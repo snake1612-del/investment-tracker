@@ -142,6 +142,19 @@ class RationalAmountRead(BaseModel):
     denominator: Annotated[str, Field(strict=True, pattern=r"^[1-9][0-9]*$")]
 
 
+def _integer_to_decimal_string(value: int) -> str:
+    """Exact local formatting; each conversion stays below Python's minimum digit limit."""
+    if value == 0:
+        return "0"
+    sign = "-" if value < 0 else ""
+    magnitude = abs(value)
+    chunks: list[int] = []
+    while magnitude:
+        magnitude, remainder = divmod(magnitude, 10**9)
+        chunks.append(remainder)
+    return sign + str(chunks[-1]) + "".join(f"{chunk:09d}" for chunk in reversed(chunks[:-1]))
+
+
 class ExactMoneyRead(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -154,7 +167,8 @@ class ExactMoneyRead(BaseModel):
         return cls(
             currency_code=money.currency_code,
             amount=RationalAmountRead(
-                numerator=str(money.amount.numerator), denominator=str(money.amount.denominator)
+                numerator=_integer_to_decimal_string(money.amount.numerator),
+                denominator=_integer_to_decimal_string(money.amount.denominator),
             ),
         )
 

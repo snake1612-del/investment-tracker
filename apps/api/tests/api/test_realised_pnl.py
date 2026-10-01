@@ -1,6 +1,9 @@
+import sys
 from collections.abc import Iterator
+from datetime import date
 from decimal import Context, Decimal, localcontext
 from fractions import Fraction
+from math import gcd, isqrt
 
 import pytest
 from fastapi.testclient import TestClient
@@ -8,6 +11,8 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.bootstrap import get_uow_factory
+from app.domain.portfolio.engine.exact import scaled_int_to_decimal
+from app.domain.transactions import CanonicalTransaction
 from app.infrastructure.db.unit_of_work import SqlAlchemyUnitOfWork
 from app.main import app
 
@@ -291,3 +296,93 @@ def test_openapi_exposes_reason_discriminator_not_nullable_financial_fields(
     assert "removed_basis" not in schemas["MissingAcquisitionBasisRead"]["properties"]
     for name in ("CurrencyMismatchRead", "MissingAcquisitionBasisRead"):
         assert "realised_pnl" not in schemas[name]["properties"]
+
+
+def test_account_and_portfolio_arbitrary_size_rational_from_valid_persisted_history(
+    client: TestClient,
+    clean_db: sessionmaker[Session],
+) -> None:
+    limit_before = sys.get_int_max_str_digits()
+    assert limit_before == sys.int_info.default_max_str_digits == 4300
+    p = portfolio(client)
+    a = account(client, p)
+    primes: list[int] = []
+    candidate = 100000001
+    while len(primes) < 600:
+        if all(candidate % divisor for divisor in range(3, isqrt(candidate) + 1, 2)):
+            primes.append(candidate)
+        candidate += 2
+
+    # Genuine canonical transactions, real repositories and PostgreSQL. Only setup is batched.
+    with SqlAlchemyUnitOfWork(clean_db) as uow:
+        for index, prime in enumerate(primes):
+            i = uow.instruments.add(f"Rational regression {index}").id
+            uow.transactions.add(
+                CanonicalTransaction.buy(
+                    a,
+                    i,
+                    scaled_int_to_decimal(prime, 12),
+                    Decimal("999"),
+                    Decimal("1"),
+                    "USD",
+                    date(2020, 1, 1),
+                )
+            )
+            uow.transactions.add(
+                CanonicalTransaction.sell(
+                    a,
+                    i,
+                    Decimal("1E-12"),
+                    Decimal("999"),
+                    Decimal("1"),
+                    "USD",
+                    date(2020, 1, 2),
+                )
+            )
+        uow.commit()
+
+    # Independent financial expectation: each disposed basis is exactly 1 / prime USD.
+    expected = Fraction(len(primes)) - sum((Fraction(1, prime) for prime in primes), Fraction(0))
+    with pytest.raises(ValueError, match="limit"):
+        str(expected.numerator)
+    with pytest.raises(ValueError, match="limit"):
+        str(expected.denominator)
+
+    def parse_decimal_string(value: str) -> int:
+        # Independent oracle; never parse or format an oversized int in one conversion.
+        assert value and value[0] in "123456789"
+        parsed = 0
+        for digit in value:
+            assert "0" <= digit <= "9"
+            parsed = parsed * 10 + ord(digit) - ord("0")
+        return parsed
+
+    results = []
+    for resource, id_ in [("accounts", a), ("portfolios", p)]:
+        response = client.get(f"/{resource}/{id_}/realised-pnl")
+        assert response.status_code == 200
+        result = response.json()
+        assert set(result) == {
+            "metric",
+            "resolved_pnl_by_currency",
+            "unresolved_components",
+            "is_fully_resolved",
+        }
+        assert result["metric"] == METRIC
+        assert result["is_fully_resolved"] is True
+        assert result["unresolved_components"] == []
+        assert len(result["resolved_pnl_by_currency"]) == 1
+        item = result["resolved_pnl_by_currency"][0]
+        assert set(item) == {"currency_code", "amount"}
+        assert item["currency_code"] == "USD"
+        assert set(item["amount"]) == {"numerator", "denominator"}
+        n, d = item["amount"]["numerator"], item["amount"]["denominator"]
+        assert isinstance(n, str) and isinstance(d, str)
+        assert len(n) > 4300 and len(d) > 4300
+        numerator, denominator = parse_decimal_string(n), parse_decimal_string(d)
+        assert numerator == expected.numerator
+        assert denominator == expected.denominator
+        assert denominator > 0 and gcd(numerator, denominator) == 1
+        results.append(result)
+    assert results[0] == results[1]
+    assert sys.get_int_max_str_digits() == limit_before
