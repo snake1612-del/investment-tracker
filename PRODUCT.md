@@ -115,11 +115,11 @@ Performance and benchmark comparison remain core future product capabilities. Th
 - A tax engine.
 - Advanced analytics.
 
-## Next product milestone — Manual Portfolio Workspace
+## Current product capability — Manual Portfolio Workspace
 
 “Investment Tracker can now let its owner record trades and inspect holdings and realised results in the browser.”
 
-This is the next milestone, not a completed capability. It will expose existing supported workflows through the web, adding only the minimal browse/read support needed for that user journey. It does not introduce a new financial engine. Corrections remain required for MVP v0.1, but are not part of the first Workspace milestone.
+The browser now exposes the supported journal workflow, with minimal Portfolio/Account list reads for discovery. It introduces no new financial engine. Corrections remain required for MVP v0.1, but are not part of this first Workspace milestone. Backup/restore and an appropriate access boundary are also still required before regular real-data use.
 
 ## Long-term asset coverage
 
@@ -150,10 +150,10 @@ Already approved and no longer open:
 - Web-first delivery, initial stack, module boundaries and persistence model: Decisions 004–009.
 - Manual trade contracts and position/FIFO/realised-P&L capabilities: Decisions 010–015 and F001–F005.
 - Immediate MVP scope and productisation priority: Decision 016.
+- Exact-money presentation is approved for Manual Portfolio Workspace: native BigInt rationals, currency suffix, at most eight displayed decimal places, approximate values marked `≈`, no feedback into financial state or writes. The lossless API contract is unchanged.
 
 The following remain open before their corresponding capabilities are implemented:
 
-- Exact-money presentation policy, without changing the lossless rational API contract.
 - Public correction workflow/contracts for supported manual events.
 - Cash/income/expense calculations beyond the currently approved semantics.
 - Valuation and unrealised-P&L methodology.

@@ -67,6 +67,10 @@ class SqlAlchemyPortfolioRepository:
         model = self.session.get(PortfolioModel, portfolio_id)
         return portfolio_record(model) if model is not None else None
 
+    def list(self) -> list[PortfolioRecord]:
+        models = self.session.scalars(select(PortfolioModel).order_by(PortfolioModel.id)).all()
+        return [portfolio_record(model) for model in models]
+
 
 class SqlAlchemyInvestmentAccountRepository:
     def __init__(self, session: Session) -> None:

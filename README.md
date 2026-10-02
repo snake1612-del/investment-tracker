@@ -4,9 +4,9 @@
 
 ## Status
 
-Investment Tracker is a single-user investment tracker with a working financial backend/API. The web application is still a scaffold, not a usable investment journal.
+Investment Tracker is a single-user investment tracker with a working financial backend/API and a Manual Portfolio Workspace in the browser.
 
-The revised MVP v0.1 is a usable personal manual investment journal. Productisation now takes priority over another calculation layer; the next product milestone is **Manual Portfolio Workspace**. See [PRODUCT.md](PRODUCT.md) and [Decision 016](docs/DECISIONS.md#decision-016--mvp-v01-re-baseline) for the approved scope.
+The revised MVP v0.1 is a usable personal manual investment journal. Manual Portfolio Workspace provides the first browser workflow; corrections, backup/restore and an appropriate access boundary remain prerequisites for regular real-data use. See [PRODUCT.md](PRODUCT.md) and [Decision 016](docs/DECISIONS.md#decision-016--mvp-v01-re-baseline) for the approved scope.
 
 ## Goals
 
@@ -22,7 +22,7 @@ The revised MVP v0.1 is a usable personal manual investment journal. Productisat
 - Public Account and Portfolio reads expose exact position quantities and gross trade-cash realised P&L.
 - FIFO lots and cost-basis reconstruction are internal, recomputable derived capabilities, not public lot/cost-basis APIs.
 - Financial facts preserve independent quantity / price / cash inputs. Realised P&L uses exact rational money, remains partitioned by currency, and explicitly reports unresolved missing-basis or currency-mismatch components. It is not net, tax-adjusted or FX-converted profit.
-- These capabilities are usable through API clients only. Browser workflows, Portfolio/Account browsing and journal corrections are not implemented. Valuation, unrealised P&L, performance, benchmark and imports remain future capabilities.
+- The browser supports Portfolio/Account browsing and creation, Instrument selection/creation, manual DEPOSIT / BUY / SELL, Account History, and Account/Portfolio Holdings and gross realised results. Corrections, valuation, unrealised P&L, performance, benchmark and imports remain future capabilities.
 
 ## Documentation
 
@@ -51,7 +51,33 @@ pnpm lint
 pnpm typecheck
 pnpm test
 pnpm format:check
+pnpm build
 ```
+
+Start the API on `127.0.0.1:8000` and open the web server (normally `http://localhost:3000`). Web requests use a same-origin `/api` rewrite to the API; set the server-side `API_URL` before starting/building web if the API endpoint differs. This is a local single-user workflow, not an authentication or public-deployment boundary.
+
+Workspace context is Portfolio → Account, with a Portfolio summary option. Account views are Holdings / History / Realised result; Portfolio summary has no transaction entry or History. Creation and recording use dialogs. BUY/SELL quantity, price and cash remain independent decimal-string inputs; mismatch and oversell do not block valid entry.
+
+Exact-money presentation uses native BigInt rationals, currency suffixes and at most eight decimal places. Non-exact display rounding is half away from zero and marked `≈`; original rational values remain unchanged and display values never feed writes/calculations. No currency totals or FX conversion are performed.
+
+### Browser E2E
+
+The minimal Playwright suite covers the full journal journey and incomplete oversell results on desktop and narrow viewports. It writes uniquely named synthetic records through the browser, so **do not point its API at a personal/development-data database**.
+
+First run the full backend tests below to initialize/recreate the disposable `investment_tracker_test` database. After those tests finish, start a separate API process with `DATABASE_URL` set to:
+
+```text
+postgresql+psycopg://investment_tracker:local_development_only@127.0.0.1:55432/investment_tracker_test
+```
+
+Then, from `apps/web`:
+
+```bash
+pnpm exec playwright install chromium
+pnpm test:e2e
+```
+
+Do not run backend tests concurrently with E2E: backend tests recreate that database. Playwright starts web when needed and expects the API already running on port 8000. `WEB_PORT` overrides the default web port 3000 if occupied; `API_URL` overrides the rewrite target. Stop the test API/web processes afterwards; the next backend test run recreates disposable records. Existing GitHub CI checks are unchanged; E2E is currently a separate local verification command.
 
 ### API
 

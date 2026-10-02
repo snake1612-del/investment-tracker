@@ -16,6 +16,8 @@ dist/
 build/
 out/
 coverage/
+playwright-report/
+test-results/
 .turbo/
 .parcel-cache/
 .eslintcache

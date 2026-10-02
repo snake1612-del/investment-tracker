@@ -7,10 +7,20 @@ from app.application.use_cases import (
     UowFactory,
     create_investment_account,
     get_account_realised_pnl_read,
+    list_portfolio_accounts,
 )
 from app.bootstrap import get_uow_factory
 
 router = APIRouter()
+
+
+@router.get("/portfolios/{portfolio_id}/accounts", response_model=list[AccountRead])
+def get_accounts(
+    portfolio_id: int, factory: Annotated[UowFactory, Depends(get_uow_factory)]
+) -> list[AccountRead]:
+    return [
+        AccountRead.from_record(record) for record in list_portfolio_accounts(factory, portfolio_id)
+    ]
 
 
 @router.post(
