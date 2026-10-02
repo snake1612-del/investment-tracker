@@ -192,6 +192,15 @@ function PortfolioContext({
       : accounts.data?.find((a) => String(a.id) === selected);
   const invalid =
     selected !== "" && selected !== "summary" && !account && !accounts.loading;
+  useEffect(() => {
+    if (
+      accounts.data &&
+      selected !== "" &&
+      selected !== "summary" &&
+      !accounts.data.some((a) => String(a.id) === selected)
+    )
+      onSelected("summary");
+  }, [accounts.data, selected, onSelected]);
   return (
     <>
       <section className="context account-context">

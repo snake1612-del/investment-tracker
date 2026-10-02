@@ -93,12 +93,38 @@ describe("Home", () => {
         ).not.toBeInTheDocument();
         expect(writes).toEqual([]);
         if (scenario === "summary") return;
+        fireEvent.click(
+          screen.getByRole("button", { name: "Refresh portfolios" }),
+        );
+        expect(screen.getByText("Loading workspace…")).toBeInTheDocument();
+        finishPortfolios(Response.json(portfolios));
         expect(
-          screen.getByText(/selected Account is no longer available/),
+          await screen.findByText("Loading accounts…"),
         ).toBeInTheDocument();
-        fireEvent.change(screen.getByLabelText("Account"), {
-          target: { value: "3" },
+        finishAccounts(Response.json(accounts));
+        await waitFor(() => {
+          expect(screen.getByLabelText("Account")).not.toBeDisabled();
+          expect(screen.getByLabelText("Account")).toHaveValue("summary");
         });
+        expect(
+          within(screen.getByLabelText("Account")).getByRole("option", {
+            name: "Second · #4",
+          }),
+        ).toBeInTheDocument();
+        expect(
+          screen.queryByRole("tab", { name: "History" }),
+        ).not.toBeInTheDocument();
+        expect(
+          screen.queryByRole("button", { name: "Record transaction" }),
+        ).not.toBeInTheDocument();
+        expect(writes).toEqual([]);
+        fireEvent.change(screen.getByLabelText("Account"), {
+          target: { value: "4" },
+        });
+        expect(screen.getByLabelText("Account")).toHaveValue("4");
+        expect(
+          screen.getByRole("tab", { name: "History" }),
+        ).toBeInTheDocument();
       }
       await waitFor(() =>
         expect(
@@ -122,7 +148,7 @@ describe("Home", () => {
       await waitFor(() =>
         expect(writes).toEqual([
           {
-            url: `/api/accounts/${scenario === "Account" ? 4 : 3}/deposits`,
+            url: "/api/accounts/4/deposits",
             body: expect.objectContaining({
               currency_code: "USD",
               cash_amount: "10",
