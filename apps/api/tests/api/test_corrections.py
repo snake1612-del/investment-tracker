@@ -1,4 +1,5 @@
 from collections.abc import Iterator
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -62,7 +63,14 @@ def test_update_and_hard_delete_preserve_identity(
         row = session.get(TransactionModel, original["id"])
         assert row is not None
         row.related_transaction_id = parent["id"]
+        # A known old timestamp avoids elapsed-time/DB precision assumptions.
+        row.updated_at = datetime(2000, 1, 1, tzinfo=UTC)
         session.commit()
+    before = next(
+        row
+        for row in client.get(f"/accounts/{account}/transactions").json()
+        if row["id"] == original["id"]
+    )
     other = client.post("/instruments", json={"name": "Corrected"}).json()["id"]
     correction = (
         {**deposit, "cash_amount": "23", "currency_code": "EUR", "effective_date": "2019-12-31"}
@@ -78,9 +86,22 @@ def test_update_and_hard_delete_preserve_identity(
         )
     )
     url = f"/accounts/{account}/transactions/{original['id']}"
+    before_put = datetime.now(UTC)
     response = client.put(url, json=correction)
     assert response.status_code == 200
     updated = response.json()
+    updated_at = datetime.fromisoformat(updated["updated_at"])
+    assert updated_at.utcoffset() == timedelta(0)
+    assert updated_at > datetime.fromisoformat(before["updated_at"])
+    assert before_put <= updated_at <= datetime.now(UTC)
+    with clean_db() as session:
+        persisted = session.get(TransactionModel, original["id"])
+        assert persisted is not None
+        assert persisted.updated_at == updated_at
+        assert persisted.created_at == datetime.fromisoformat(original["created_at"])
+        assert persisted.effective_date.isoformat() == correction["effective_date"]
+        assert persisted.currency_code == correction["currency_code"]
+        assert persisted.cash_amount == Decimal("23")
     for field in ("id", "type", "account_id", "created_at", "note"):
         assert updated[field] == original[field]
     assert updated["related_transaction_id"] == parent["id"]
@@ -169,7 +190,9 @@ def test_invalid_update_rolls_back(client: TestClient, field: str, value: object
     url = f"/accounts/{account}/transactions/{original['id']}"
     before = client.get(f"/accounts/{account}/transactions").json()
     assert client.put(url, json=body(instrument, **{field: value})).status_code == 422
-    assert client.get(f"/accounts/{account}/transactions").json() == before
+    after = client.get(f"/accounts/{account}/transactions").json()
+    assert after[0]["updated_at"] == before[0]["updated_at"]
+    assert after == before
 
 
 @pytest.mark.parametrize(

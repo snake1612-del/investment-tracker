@@ -1,5 +1,7 @@
 """SQLAlchemy implementations of the current persistence capabilities."""
 
+from datetime import UTC, datetime
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -171,6 +173,7 @@ class SqlAlchemyTransactionRepository:
             model.price = facts.price
             model.settlement_date = facts.settlement_date
         # Identity, type, Account, creation metadata, note and canonical relations are untouched.
+        model.updated_at = datetime.now(UTC)
         self.session.flush()
         return transaction_record(model)
 
