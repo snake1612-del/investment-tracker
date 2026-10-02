@@ -94,6 +94,12 @@ describe("workspace financial views", () => {
       ).toBeInTheDocument();
       expect(screen.queryByRole("alert")).not.toBeInTheDocument();
       expect(screen.getByText(/SELL transaction #3/)).toBeInTheDocument();
+      expect(
+        screen.getByText("Allocated proceeds: 12 USD"),
+      ).toBeInTheDocument();
+      if (reason === "CURRENCY_MISMATCH")
+        expect(screen.getByText("Removed basis: 12 EUR")).toBeInTheDocument();
+      else expect(screen.queryByText(/Removed basis:/)).not.toBeInTheDocument();
     },
   );
   it("does not replace malformed exact money with zero", () => {
@@ -112,6 +118,39 @@ describe("workspace financial views", () => {
     );
     expect(screen.getByRole("alert")).toHaveTextContent("Invalid");
     expect(screen.queryByText("0 USD")).not.toBeInTheDocument();
+  });
+  it("safely rejects unexpected malformed basis on a missing-basis component", () => {
+    const result: Realised = {
+      ...empty,
+      is_fully_resolved: false,
+      unresolved_components: [
+        {
+          reason: "MISSING_ACQUISITION_BASIS",
+          account_id: 1,
+          sell_transaction_id: 3,
+          instrument_id: 2,
+          instrument_name: "Fund",
+          quantity: "1",
+          effective_date: "2026-01-02",
+          allocated_proceeds: {
+            currency_code: "USD",
+            amount: { numerator: "12", denominator: "1" },
+          },
+          removed_basis: {
+            currency_code: "USD",
+            amount: { numerator: "1", denominator: "0" },
+          },
+        },
+      ],
+    };
+    expect(() => render(<RealisedResult result={result} />)).not.toThrow();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Unable to display financial results",
+    );
+    expect(screen.queryByText("0 USD")).not.toBeInTheDocument();
+    expect(screen.queryByText("Resolved")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Allocated proceeds:/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Removed basis:/)).not.toBeInTheDocument();
   });
   it("represents zero and negative holdings honestly", () => {
     render(

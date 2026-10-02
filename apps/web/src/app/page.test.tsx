@@ -19,6 +19,119 @@ describe("Home", () => {
     };
   });
   afterEach(() => vi.unstubAllGlobals());
+  it.each(["Account", "summary", "removed Account"])(
+    "preserves or safely invalidates %s through delayed discovery refresh",
+    async (scenario) => {
+      const portfolios = [{ id: 1, name: "Portfolio" }];
+      const accounts = [
+        { id: 3, portfolio_id: 1, name: "First" },
+        { id: 4, portfolio_id: 1, name: "Second" },
+      ];
+      let portfolioReads = 0;
+      let accountReads = 0;
+      let finishPortfolios!: (response: Response) => void;
+      let finishAccounts!: (response: Response) => void;
+      const writes: { url: string; body: unknown }[] = [];
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (url: string, options: RequestInit) => {
+          if (options.method === "POST") {
+            writes.push({ url, body: JSON.parse(String(options.body)) });
+            return Response.json({});
+          }
+          if (url === "/api/portfolios") {
+            if (++portfolioReads === 1) return Response.json(portfolios);
+            return new Promise<Response>((resolve) => {
+              finishPortfolios = resolve;
+            });
+          }
+          if (url === "/api/portfolios/1/accounts") {
+            if (++accountReads === 1) return Response.json(accounts);
+            return new Promise<Response>((resolve) => {
+              finishAccounts = resolve;
+            });
+          }
+          if (url.endsWith("/realised-pnl"))
+            return Response.json({
+              metric: "GROSS_TRADE_CASH_REALISED_PNL",
+              resolved_pnl_by_currency: [],
+              unresolved_components: [],
+              is_fully_resolved: true,
+            });
+          return Response.json([]);
+        }),
+      );
+      render(<Home />);
+      await waitFor(() =>
+        expect(screen.getByLabelText("Account")).toHaveValue("3"),
+      );
+      fireEvent.change(screen.getByLabelText("Account"), {
+        target: { value: scenario === "summary" ? "summary" : "4" },
+      });
+      fireEvent.click(
+        screen.getByRole("button", { name: "Refresh portfolios" }),
+      );
+      expect(screen.getByText("Loading workspace…")).toBeInTheDocument();
+      finishPortfolios(Response.json(portfolios));
+      expect(await screen.findByText("Loading accounts…")).toBeInTheDocument();
+      finishAccounts(
+        Response.json(
+          scenario === "removed Account" ? [accounts[0]] : accounts,
+        ),
+      );
+      const expected = scenario === "Account" ? "4" : "summary";
+      await waitFor(() => {
+        expect(screen.getByLabelText("Account")).not.toBeDisabled();
+        expect(screen.getByLabelText("Account")).toHaveValue(expected);
+      });
+      if (scenario !== "Account") {
+        expect(
+          screen.queryByRole("tab", { name: "History" }),
+        ).not.toBeInTheDocument();
+        expect(
+          screen.queryByRole("button", { name: "Record transaction" }),
+        ).not.toBeInTheDocument();
+        expect(writes).toEqual([]);
+        if (scenario === "summary") return;
+        expect(
+          screen.getByText(/selected Account is no longer available/),
+        ).toBeInTheDocument();
+        fireEvent.change(screen.getByLabelText("Account"), {
+          target: { value: "3" },
+        });
+      }
+      await waitFor(() =>
+        expect(
+          screen.getByRole("button", { name: "Record transaction" }),
+        ).not.toBeDisabled(),
+      );
+      fireEvent.click(
+        screen.getByRole("button", { name: "Record transaction" }),
+      );
+      fireEvent.change(screen.getByLabelText("Currency"), {
+        target: { value: "USD" },
+      });
+      fireEvent.change(screen.getByLabelText("Cash amount"), {
+        target: { value: "10" },
+      });
+      fireEvent.click(
+        within(screen.getByRole("dialog")).getByRole("button", {
+          name: "Record transaction",
+        }),
+      );
+      await waitFor(() =>
+        expect(writes).toEqual([
+          {
+            url: `/api/accounts/${scenario === "Account" ? 4 : 3}/deposits`,
+            body: expect.objectContaining({
+              currency_code: "USD",
+              cash_amount: "10",
+            }),
+          },
+        ]),
+      );
+    },
+  );
   it("switches canonical Portfolio/Account contexts, resets invalid Account and ignores stale responses", async () => {
     let delayed!: (response: Response) => void;
     vi.stubGlobal(

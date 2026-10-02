@@ -45,6 +45,10 @@ export default function Workspace() {
   const [revision, setRevision] = useState(0);
   const portfolios = useRead<Entity[]>("/portfolios", revision);
   const [selected, setSelected] = useState("");
+  const [accountSelection, setAccountSelection] = useState<{
+    portfolioId: number;
+    value: string;
+  } | null>(null);
   const [creating, setCreating] = useState(false);
   const [feedback, setFeedback] = useState("");
   const active =
@@ -72,6 +76,7 @@ export default function Workspace() {
             value={active?.id ?? ""}
             onChange={(e) => {
               setSelected(e.target.value);
+              setAccountSelection(null);
               setFeedback("");
             }}
             disabled={portfolios.loading}
@@ -122,6 +127,14 @@ export default function Workspace() {
         <PortfolioContext
           key={active.id}
           portfolio={active}
+          selected={
+            accountSelection?.portfolioId === active.id
+              ? accountSelection.value
+              : ""
+          }
+          onSelected={(value) =>
+            setAccountSelection({ portfolioId: active.id, value })
+          }
           onFeedback={setFeedback}
         />
       ) : (
@@ -145,6 +158,7 @@ export default function Workspace() {
           onClose={() => setCreating(false)}
           onCreated={(entity) => {
             setSelected(String(entity.id));
+            setAccountSelection(null);
             setRevision((r) => r + 1);
             setCreating(false);
             setFeedback("Portfolio created.");
@@ -157,9 +171,13 @@ export default function Workspace() {
 
 function PortfolioContext({
   portfolio,
+  selected,
+  onSelected,
   onFeedback,
 }: {
   portfolio: Entity;
+  selected: string;
+  onSelected: (value: string) => void;
   onFeedback: (message: string) => void;
 }) {
   const [revision, setRevision] = useState(0);
@@ -167,7 +185,6 @@ function PortfolioContext({
     `/portfolios/${portfolio.id}/accounts`,
     revision,
   );
-  const [selected, setSelected] = useState("");
   const [creating, setCreating] = useState(false);
   const account =
     selected === ""
@@ -185,7 +202,7 @@ function PortfolioContext({
             value={account ? String(account.id) : "summary"}
             disabled={accounts.loading}
             onChange={(e) => {
-              setSelected(e.target.value);
+              onSelected(e.target.value);
               onFeedback("");
             }}
           >
@@ -251,7 +268,7 @@ function PortfolioContext({
           portfolioId={portfolio.id}
           onClose={() => setCreating(false)}
           onCreated={(entity) => {
-            setSelected(String(entity.id));
+            onSelected(String(entity.id));
             setRevision((r) => r + 1);
             setCreating(false);
             onFeedback("Account created.");

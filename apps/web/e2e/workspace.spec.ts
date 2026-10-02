@@ -93,7 +93,8 @@ test("complete manual journal journey without API or manual IDs", async ({
   await expect(page.getByRole("tabpanel")).toContainText("12.00000000");
   await page.getByRole("tab", { name: "Holdings", exact: true }).click();
   await expect(page.getByRole("table")).toContainText(`Fund ${suffix}`);
-  await expect(page.getByRole("table")).toContainText("2");
+  const holding = page.getByRole("row").filter({ hasText: `Fund ${suffix}` });
+  await expect(holding.getByRole("cell").nth(1)).toHaveText("2.000000000000");
   await record(page, "Sell", "9", `Fund ${suffix}`);
   await page.getByRole("tab", { name: "Realised result", exact: true }).click();
   await expect(page.getByText("3 USD", { exact: true })).toBeVisible();

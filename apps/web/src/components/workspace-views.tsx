@@ -1,4 +1,10 @@
-import type { Entity, Position, Realised, Transaction } from "../lib/api";
+import type {
+  Entity,
+  Position,
+  Realised,
+  Transaction,
+  Unresolved,
+} from "../lib/api";
 import { decimalUnits, formatMoney, parseMoney } from "../lib/exact-money";
 
 export function Holdings({
@@ -145,7 +151,12 @@ export function History({
 
 export function RealisedResult({ result }: { result: Realised }) {
   let payloadError = "";
-  let amounts: ReturnType<typeof parseMoney>[] = [];
+  let amounts: { currency: string; display: string; exact: string }[] = [];
+  let unresolved: {
+    source: Unresolved;
+    proceeds: string;
+    basis?: string;
+  }[] = [];
   try {
     if (
       result.metric !== "GROSS_TRADE_CASH_REALISED_PNL" ||
@@ -155,18 +166,32 @@ export function RealisedResult({ result }: { result: Realised }) {
       result.is_fully_resolved !== (result.unresolved_components.length === 0)
     )
       throw new Error("Invalid realised result payload.");
-    amounts = result.resolved_pnl_by_currency.map(parseMoney);
+    amounts = result.resolved_pnl_by_currency.map((value) => {
+      const money = parseMoney(value);
+      return {
+        currency: money.currency,
+        display: formatMoney(money),
+        exact: `Exact value: ${money.numerator} / ${money.denominator} ${money.currency}`,
+      };
+    });
     if (new Set(amounts.map((m) => m.currency)).size !== amounts.length)
       throw new Error("Invalid duplicate currency subtotals.");
-    for (const u of result.unresolved_components) {
-      parseMoney(u.allocated_proceeds);
+    unresolved = result.unresolved_components.map((u) => {
+      const proceeds = formatMoney(parseMoney(u.allocated_proceeds));
       if (u.reason === "CURRENCY_MISMATCH") {
         if (!u.removed_basis)
           throw new Error("Invalid currency mismatch payload.");
-        parseMoney(u.removed_basis);
+        return {
+          source: u,
+          proceeds,
+          basis: formatMoney(parseMoney(u.removed_basis)),
+        };
       } else if (u.reason !== "MISSING_ACQUISITION_BASIS")
         throw new Error("Unknown unresolved reason.");
-    }
+      if ("removed_basis" in u)
+        throw new Error("Invalid missing acquisition basis payload.");
+      return { source: u, proceeds };
+    });
   } catch (error) {
     payloadError =
       error instanceof Error ? error.message : "Invalid financial payload.";
@@ -201,11 +226,7 @@ export function RealisedResult({ result }: { result: Realised }) {
                 {money.currency}
                 {!result.is_fully_resolved && " · resolved subtotal only"}
               </small>
-              <strong
-                title={`Exact value: ${money.numerator} / ${money.denominator} ${money.currency}`}
-              >
-                {formatMoney(money)}
-              </strong>
+              <strong title={money.exact}>{money.display}</strong>
             </div>
           ))}
         </div>
@@ -213,7 +234,7 @@ export function RealisedResult({ result }: { result: Realised }) {
       {result.unresolved_components.length > 0 && (
         <>
           <h4>Unresolved activity</h4>
-          {result.unresolved_components.map((u, index) => (
+          {unresolved.map(({ source: u, proceeds, basis }, index) => (
             <article
               className="unresolved"
               key={`${u.account_id}-${u.sell_transaction_id}-${index}`}
@@ -238,15 +259,8 @@ export function RealisedResult({ result }: { result: Realised }) {
               </small>
               <details>
                 <summary>Details</summary>
-                <p>
-                  Allocated proceeds:{" "}
-                  {formatMoney(parseMoney(u.allocated_proceeds))}
-                </p>
-                {u.removed_basis && (
-                  <p>
-                    Removed basis: {formatMoney(parseMoney(u.removed_basis))}
-                  </p>
-                )}
+                <p>Allocated proceeds: {proceeds}</p>
+                {basis !== undefined && <p>Removed basis: {basis}</p>}
               </details>
             </article>
           ))}
