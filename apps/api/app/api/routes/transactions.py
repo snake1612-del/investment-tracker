@@ -1,9 +1,22 @@
 from decimal import Decimal, InvalidOperation
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Response, status
 
-from app.api.schemas import DepositCreate, PositionRead, TradeCreate, TransactionRead
+from app.api.schemas import (
+    DepositCorrectionRequest,
+    DepositCreate,
+    PositionRead,
+    TradeCorrectionRequest,
+    TradeCreate,
+    TransactionRead,
+)
+from app.application.corrections import (
+    DepositCorrection,
+    TradeCorrection,
+    delete_manual_transaction,
+    update_manual_transaction,
+)
 from app.application.use_cases import (
     InvalidInput,
     UowFactory,
@@ -16,6 +29,46 @@ from app.application.use_cases import (
 from app.bootstrap import get_uow_factory
 
 router = APIRouter()
+
+
+@router.put("/accounts/{account_id}/transactions/{transaction_id}", response_model=TransactionRead)
+def put_transaction(
+    account_id: int,
+    transaction_id: int,
+    body: TradeCorrectionRequest | DepositCorrectionRequest,
+    factory: Annotated[UowFactory, Depends(get_uow_factory)],
+) -> TransactionRead:
+    try:
+        correction = (
+            TradeCorrection(
+                body.instrument_id,
+                body.effective_date,
+                body.currency_code,
+                Decimal(body.quantity),
+                Decimal(body.price),
+                Decimal(body.cash_amount),
+                body.settlement_date,
+            )
+            if isinstance(body, TradeCorrectionRequest)
+            else DepositCorrection(
+                body.effective_date, body.currency_code, Decimal(body.cash_amount)
+            )
+        )
+    except InvalidOperation as exc:
+        raise InvalidInput("Financial values must be decimal strings") from exc
+    return TransactionRead.from_record(
+        update_manual_transaction(factory, account_id, transaction_id, correction)
+    )
+
+
+@router.delete("/accounts/{account_id}/transactions/{transaction_id}", status_code=204)
+def delete_transaction(
+    account_id: int,
+    transaction_id: int,
+    factory: Annotated[UowFactory, Depends(get_uow_factory)],
+) -> Response:
+    delete_manual_transaction(factory, account_id, transaction_id)
+    return Response(status_code=204)
 
 
 @router.post(

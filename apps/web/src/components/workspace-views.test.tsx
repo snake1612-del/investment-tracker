@@ -171,6 +171,7 @@ describe("workspace financial views", () => {
       id: 1,
       account_id: 1,
       instrument_id: null,
+      settlement_date: null,
       type: "DEPOSIT",
       effective_date: "2026-01-01",
       currency_code: "USD",

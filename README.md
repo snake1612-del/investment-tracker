@@ -6,7 +6,7 @@
 
 Investment Tracker is a single-user investment tracker with a working financial backend/API and a Manual Portfolio Workspace in the browser.
 
-The revised MVP v0.1 is a usable personal manual investment journal. Manual Portfolio Workspace provides the first browser workflow; corrections, backup/restore and an appropriate access boundary remain prerequisites for regular real-data use. See [PRODUCT.md](PRODUCT.md) and [Decision 016](docs/DECISIONS.md#decision-016--mvp-v01-re-baseline) for the approved scope.
+The revised MVP v0.1 is a usable personal manual investment journal. Manual Portfolio Workspace and Journal Corrections provide browser entry and correction workflows; backup/restore and an appropriate access boundary remain prerequisites for regular real-data use. See [PRODUCT.md](PRODUCT.md) and [Decision 016](docs/DECISIONS.md#decision-016--mvp-v01-re-baseline) for the approved scope.
 
 ## Goals
 
@@ -22,7 +22,7 @@ The revised MVP v0.1 is a usable personal manual investment journal. Manual Port
 - Public Account and Portfolio reads expose exact position quantities and gross trade-cash realised P&L.
 - FIFO lots and cost-basis reconstruction are internal, recomputable derived capabilities, not public lot/cost-basis APIs.
 - Financial facts preserve independent quantity / price / cash inputs. Realised P&L uses exact rational money, remains partitioned by currency, and explicitly reports unresolved missing-basis or currency-mismatch components. It is not net, tax-adjusted or FX-converted profit.
-- The browser supports Portfolio/Account browsing and creation, Instrument selection/creation, manual DEPOSIT / BUY / SELL, Account History, and Account/Portfolio Holdings and gross realised results. Corrections, valuation, unrealised P&L, performance, benchmark and imports remain future capabilities.
+- The browser supports Portfolio/Account browsing and creation, Instrument selection/creation, manual DEPOSIT / BUY / SELL, Account History with edit/hard-delete for those types, and Account/Portfolio Holdings and gross realised results. Valuation, unrealised P&L, performance, benchmark and imports remain future capabilities.
 
 ## Documentation
 
@@ -58,11 +58,13 @@ Start the API on `127.0.0.1:8000` and open the web server (normally `http://loca
 
 Workspace context is Portfolio → Account, with a Portfolio summary option. Account views are Holdings / History / Realised result; Portfolio summary has no transaction entry or History. Creation and recording use dialogs. BUY/SELL quantity, price and cash remain independent decimal-string inputs; mismatch and oversell do not block valid entry.
 
+History Edit replaces approved factual fields in place, preserving ID, type, Account, creation metadata, note and canonical relations. Delete requires confirmation and permanently removes the canonical event; there is no undo or audit history. Both refresh History, Holdings and Realised result. Derived matches never block a correction, but an inbound canonical related transaction blocks deletion (409). Backdated corrections can change FIFO and past realised results; concurrent stale-tab writes are last-write-wins. See F006 and Decision 017 for the complete contract.
+
 Exact-money presentation uses native BigInt rationals, currency suffixes and at most eight decimal places. Non-exact display rounding is half away from zero and marked `≈`; original rational values remain unchanged and display values never feed writes/calculations. No currency totals or FX conversion are performed.
 
 ### Browser E2E
 
-The minimal Playwright suite covers the full journal journey and incomplete oversell results on desktop and narrow viewports. It writes uniquely named synthetic records through the browser, so **do not point its API at a personal/development-data database**.
+The minimal Playwright suite covers the full journal journey, incomplete oversell results, and correction/deletion of a consumed BUY with recomputed Holdings/Realised results on desktop and narrow viewports. It writes uniquely named synthetic records through the browser, so **do not point its API at a personal/development-data database**.
 
 First run the full backend tests below to initialize/recreate the disposable `investment_tracker_test` database. After those tests finish, start a separate API process with `DATABASE_URL` set to:
 

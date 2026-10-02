@@ -121,6 +121,21 @@ class TransactionRead(BaseModel):
         )
 
 
+class DepositCorrectionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    effective_date: date
+    currency_code: str
+    cash_amount: str
+
+
+class TradeCorrectionRequest(DepositCorrectionRequest):
+    instrument_id: int
+    quantity: str
+    price: str
+    settlement_date: date | None
+
+
 class PositionRead(BaseModel):
     instrument_id: int
     instrument_name: str

@@ -70,9 +70,13 @@ export function Holdings({
 export function History({
   transactions,
   instruments,
+  onEdit,
+  onDelete,
 }: {
   transactions: Transaction[];
   instruments: Entity[];
+  onEdit?: (transaction: Transaction) => void;
+  onDelete?: (transaction: Transaction) => void;
 }) {
   if (!transactions.length)
     return (
@@ -88,6 +92,21 @@ export function History({
     id === null
       ? "—"
       : `${instruments.find((i) => i.id === id)?.name ?? "Instrument"} · #${id}`;
+  const actions = (t: Transaction) =>
+    ["DEPOSIT", "BUY", "SELL"].includes(t.type) && (
+      <>
+        {onEdit && (
+          <button className="secondary" onClick={() => onEdit(t)}>
+            Edit
+          </button>
+        )}
+        {onDelete && (
+          <button className="secondary" onClick={() => onDelete(t)}>
+            Delete
+          </button>
+        )}
+      </>
+    );
   return (
     <>
       <table className="history-table">
@@ -101,6 +120,7 @@ export function History({
               "Price",
               "Cash amount",
               "Currency",
+              "Actions",
             ].map((label) => (
               <th key={label}>{label}</th>
             ))}
@@ -119,6 +139,7 @@ export function History({
               <td>{t.price ?? "—"}</td>
               <td>{t.cash_amount}</td>
               <td>{t.currency_code}</td>
+              <td>{actions(t)}</td>
             </tr>
           ))}
         </tbody>
@@ -142,6 +163,7 @@ export function History({
               </dd>
             </dl>
             <small>Transaction #{t.id}</small>
+            <div>{actions(t)}</div>
           </article>
         ))}
       </div>

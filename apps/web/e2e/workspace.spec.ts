@@ -128,3 +128,52 @@ test("oversell remains recordable and displays incomplete result", async ({
   await page.getByRole("tab", { name: "Holdings", exact: true }).click();
   await expect(page.getByRole("table")).toContainText("Negative quantity");
 });
+
+test("corrects and deletes consumed acquisitions through History", async ({
+  page,
+}) => {
+  const suffix = await createContext(page);
+  const instrument = `Correctable ${suffix}`;
+  await record(page, "Buy", "12", instrument, "2");
+  await record(page, "Sell", "9", instrument);
+  await page.getByRole("tab", { name: "Realised result", exact: true }).click();
+  await expect(page.getByText("3 USD", { exact: true })).toBeVisible();
+  await page.getByRole("tab", { name: "History", exact: true }).click();
+  const buy = page
+    .locator(".history-table tbody tr:visible, .history-mobile article:visible")
+    .filter({ hasText: "BUY" });
+  await buy.getByRole("button", { name: "Edit", exact: true }).click();
+  let dialog = page.getByRole("dialog");
+  await expect(dialog.getByLabel("Cash amount")).toHaveValue("12.00000000");
+  await dialog.getByLabel("Cash amount").fill("10");
+  await dialog.getByLabel("Quantity", { exact: true }).fill("4");
+  await dialog.getByRole("button", { name: "Save changes" }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(buy).toContainText("4.000000000000");
+  await page.getByRole("tab", { name: "Holdings", exact: true }).click();
+  await expect(page.getByRole("table")).toContainText("3.000000000000");
+  await page.getByRole("tab", { name: "Realised result", exact: true }).click();
+  await expect(page.getByText("6.5 USD", { exact: true })).toBeVisible();
+  await page.getByRole("tab", { name: "History", exact: true }).click();
+  await buy.getByRole("button", { name: "Delete", exact: true }).click();
+  dialog = page.getByRole("dialog");
+  await expect(dialog).toContainText("There is no undo");
+  await dialog.getByRole("button", { name: "Close dialog" }).click();
+  await expect(buy).toBeVisible();
+  await buy.getByRole("button", { name: "Delete", exact: true }).click();
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "Delete permanently" })
+    .click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(buy).toHaveCount(0);
+  await page.getByRole("tab", { name: "Realised result", exact: true }).click();
+  await expect(
+    page.getByText("Missing acquisition basis", { exact: true }),
+  ).toBeVisible();
+  await page.getByLabel("Account", { exact: true }).selectOption("summary");
+  await page.getByRole("tab", { name: "Realised result", exact: true }).click();
+  await expect(
+    page.getByText("Missing acquisition basis", { exact: true }),
+  ).toBeVisible();
+});
