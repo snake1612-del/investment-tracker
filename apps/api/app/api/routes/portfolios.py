@@ -8,10 +8,16 @@ from app.application.use_cases import (
     create_portfolio,
     get_portfolio_positions,
     get_portfolio_realised_pnl_read,
+    list_portfolios,
 )
 from app.bootstrap import get_uow_factory
 
 router = APIRouter()
+
+
+@router.get("/portfolios", response_model=list[PortfolioRead])
+def get_portfolios(factory: Annotated[UowFactory, Depends(get_uow_factory)]) -> list[PortfolioRead]:
+    return [PortfolioRead.from_record(record) for record in list_portfolios(factory)]
 
 
 @router.post("/portfolios", status_code=status.HTTP_201_CREATED, response_model=PortfolioRead)

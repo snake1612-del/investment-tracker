@@ -60,6 +60,18 @@ class RealisedPnlDataIntegrityError(RuntimeError):
 UowFactory = Callable[[], UnitOfWork]
 
 
+def list_portfolios(factory: UowFactory) -> list[PortfolioRecord]:
+    with factory() as uow:
+        return uow.portfolios.list()
+
+
+def list_portfolio_accounts(factory: UowFactory, portfolio_id: int) -> list[AccountRecord]:
+    with factory() as uow:
+        if uow.portfolios.get(portfolio_id) is None:
+            raise NotFound("Portfolio not found")
+        return uow.accounts.list_for_portfolio(portfolio_id)
+
+
 def create_portfolio(factory: UowFactory, name: str, base_currency: str) -> PortfolioRecord:
     if not name.strip() or not valid_currency_code(base_currency):
         raise InvalidInput("Portfolio name and three-letter uppercase base currency are required")
