@@ -3448,3 +3448,27 @@ The existing backend can already reconstruct supported quantities and gross real
 **Consequences**
 
 `PRODUCT.md` separates MVP v0.1, SOON AFTER and LATER; README describes actual implemented status rather than the complete target. Decisions 001–015 remain historical records, and F001–F005 methodology is unchanged. Process v2 uses one final complete-capability review by default and one coherent PR per meaningful capability, with focused re-review only for actual blockers.
+
+## Decision 017 — Manual transaction corrections API
+
+**Decision**
+
+F006 corrections use `PUT /accounts/{account_id}/transactions/{transaction_id}` and `DELETE` on the same resource. Only persisted DEPOSIT / BUY / SELL types are supported; unsupported types use the existing invalid-input convention (422).
+
+PUT represents complete corrected factual state, not PATCH. DEPOSIT requires effective_date, currency_code and cash_amount. BUY/SELL requires instrument_id, effective_date, currency_code, quantity, price, cash_amount and settlement_date; settlement_date is required but nullable, with null clearing it. Type is determined by the existing persisted transaction, not the request. Extra fields are rejected; note and canonical relations are not editable.
+
+Update mutates the existing row in place and preserves ID, type, Account, created_at, related_transaction_id and note. Existing create domain validation is reused, including exact representability and independent quantity/price/cash semantics. Success is 200 with the existing TransactionRead representation, not derived results.
+
+DELETE hard-deletes the canonical row and returns 204 without a body. Account ownership is enforced for both operations. A transaction belonging to another Account is indistinguishable from a missing transaction (404). Existing restrictive inbound canonical related_transaction_id FK blocks deletion through the existing persistence-conflict / HTTP 409 behavior. No cascade, automatic detachment or nulling is allowed. Derived dependencies do not block mutations.
+
+Each mutation loads, checks ownership/type, validates, mutates/deletes and commits atomically through the existing UoW. Failure rolls back. Repositories do not independently commit. Financial engines are not invoked during mutation: current history is reconstructed on read. The browser refetches History, Holdings and Realised result after success; Portfolio reads must not retain stale results.
+
+Concurrency is last-write-wins. No ETag, If-Match, optimistic locking or version column is introduced. Existing Account history read is sufficient for edit prefill; no transaction-details endpoint is added.
+
+**Reason**
+
+An Account-scoped full correction contract provides browser journal correction without changing financial methodology or canonical identity, which is also the FIFO tie-break key.
+
+**Consequences**
+
+No migration, soft delete, audit/versioning, revision table, reversal model, generic CRUD framework, derived cache or financial-engine change is introduced. Corrected facts immediately become the source for existing deterministic derived reads. Concurrent stale-tab writes are an accepted v0.1 limitation.

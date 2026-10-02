@@ -1044,3 +1044,27 @@ Realised P&L is dated by SELL effective date.
 Backdated canonical mutations trigger full deterministic recomputation.
 
 F005 does not define unrealised P&L, valuation, FX conversion, fee-adjusted/net P&L, tax accounting, short-selling P&L, corporate actions, bond redemption/amortization or persistence architecture.
+
+# Decision F006 — Manual Journal Corrections
+
+## Decision
+
+Manual DEPOSIT / BUY / SELL are mutable canonical facts. A correction changes the current best-known factual history through direct in-place edit, preserving the transaction ID. Deletion is canonical hard deletion: the event is absent from current history.
+
+Correction is not a reversal, compensating economic event, revision record or soft deletion. A new actual economic event must be entered as a new transaction, not used to rewrite an earlier correct fact.
+
+Effective date, Instrument and currency may be corrected. Transaction type and InvestmentAccount cannot be changed. An erroneous Account assignment is corrected by deleting the wrong record and creating the correct record under the correct Account.
+
+Existing create validation applies without a second financial validator. Quantity, price and cash amount remain independent factual values; cash is never replaced with quantity × price.
+
+All derived state reflects the current corrected canonical history under F003–F005. Derived dependencies never block correction or deletion, including deletion of an already-consumed BUY. Backdated corrections may change historical FIFO matching and realised P&L. They may create or remove MISSING_ACQUISITION_BASIS or CURRENCY_MISMATCH. Old derived outcomes are not preserved for stability.
+
+An active canonical transaction related to a primary transaction blocks deletion of that primary transaction. Derived matches and positions are not canonical related transactions and do not constitute this deletion restriction.
+
+## Reason
+
+The manual journal must allow factual entry mistakes to be corrected before regular use, while keeping canonical identity and the F004 effective_date / transaction_id ordering stable.
+
+## Consequences
+
+The approved correction scope is DEPOSIT / BUY / SELL only. Existing identity, type, Account, note and canonical relations remain unchanged by an edit. There is no reversal model, audit trail or revision history. All existing reconstructions operate on current facts; F001–F005 remain unchanged.

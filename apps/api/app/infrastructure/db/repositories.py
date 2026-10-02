@@ -9,6 +9,7 @@ from app.application.contracts import (
     PortfolioRecord,
     TransactionRecord,
 )
+from app.application.use_cases import InvalidInput, NotFound
 from app.domain.transactions import CanonicalTransaction, TransactionType
 from app.infrastructure.db.models import (
     InstrumentModel,
@@ -143,3 +144,39 @@ class SqlAlchemyTransactionRepository:
             .order_by(TransactionModel.id)
         ).all()
         return [transaction_record(model) for model in models]
+
+    def _scoped_model(self, account_id: int, transaction_id: int) -> TransactionModel | None:
+        return self.session.scalar(
+            select(TransactionModel).where(
+                TransactionModel.id == transaction_id, TransactionModel.account_id == account_id
+            )
+        )
+
+    def get_for_account(self, account_id: int, transaction_id: int) -> TransactionRecord | None:
+        model = self._scoped_model(account_id, transaction_id)
+        return transaction_record(model) if model is not None else None
+
+    def update_facts(self, transaction_id: int, facts: CanonicalTransaction) -> TransactionRecord:
+        model = self._scoped_model(facts.account_id, transaction_id)
+        if model is None:
+            raise NotFound("Transaction not found")
+        if model.type != facts.type.value:
+            raise InvalidInput("Transaction type cannot change")
+        model.effective_date = facts.effective_date
+        model.currency_code = facts.currency_code
+        model.cash_amount = facts.cash_amount
+        if facts.type in {TransactionType.BUY, TransactionType.SELL}:
+            model.instrument_id = facts.instrument_id
+            model.quantity = facts.quantity
+            model.price = facts.price
+            model.settlement_date = facts.settlement_date
+        # Identity, type, Account, creation metadata, note and canonical relations are untouched.
+        self.session.flush()
+        return transaction_record(model)
+
+    def delete_for_account(self, account_id: int, transaction_id: int) -> None:
+        model = self._scoped_model(account_id, transaction_id)
+        if model is None:
+            raise NotFound("Transaction not found")
+        self.session.delete(model)
+        self.session.flush()

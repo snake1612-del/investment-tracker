@@ -14,6 +14,7 @@ export type Transaction = {
   instrument_id: number | null;
   type: string;
   effective_date: string;
+  settlement_date: string | null;
   currency_code: string;
   quantity: string | null;
   price: string | null;
@@ -51,11 +52,12 @@ export async function api<T>(
   path: string,
   body?: object,
   signal?: AbortSignal,
+  method?: "PUT" | "DELETE",
 ): Promise<T> {
   let response: Response;
   try {
     response = await fetch(`/api${path}`, {
-      method: body ? "POST" : "GET",
+      method: method ?? (body ? "POST" : "GET"),
       headers: body ? { "Content-Type": "application/json" } : undefined,
       body: body ? JSON.stringify(body) : undefined,
       cache: "no-store",
@@ -87,5 +89,5 @@ export async function api<T>(
       fields,
     );
   }
-  return response.json();
+  return response.status === 204 ? (undefined as T) : response.json();
 }

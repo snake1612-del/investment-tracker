@@ -9,6 +9,7 @@ import {
   type Transaction,
 } from "../lib/api";
 import { EntityDialog, TransactionDialog } from "./entry-dialogs";
+import { CorrectionDialog } from "./correction-dialog";
 import { History, Holdings, RealisedResult } from "./workspace-views";
 
 function useRead<T>(path: string | null, revision = 0) {
@@ -300,6 +301,10 @@ function AccountWorkspace({
   const [tab, setTab] = useState("Holdings");
   const [revision, setRevision] = useState(0);
   const [recording, setRecording] = useState(false);
+  const [correction, setCorrection] = useState<{
+    transaction: Transaction;
+    deleting: boolean;
+  } | null>(null);
   const [instrumentRevision, setInstrumentRevision] = useState(0);
   const instruments = useRead<Entity[]>("/instruments", instrumentRevision);
   const [createdInstruments, setCreatedInstruments] = useState<Entity[]>([]);
@@ -389,7 +394,19 @@ function AccountWorkspace({
         ) : tab === "Holdings" && positions.data ? (
           <Holdings positions={positions.data} account={!!account} />
         ) : tab === "History" && history.data ? (
-          <History transactions={history.data} instruments={metadata} />
+          <History
+            transactions={history.data}
+            instruments={metadata}
+            onEdit={
+              instruments.loading || instruments.error
+                ? undefined
+                : (transaction) =>
+                    setCorrection({ transaction, deleting: false })
+            }
+            onDelete={(transaction) =>
+              setCorrection({ transaction, deleting: true })
+            }
+          />
         ) : (
           result.data && <RealisedResult result={result.data} />
         )}
@@ -408,6 +425,23 @@ function AccountWorkspace({
             setRecording(false);
             setRevision((r) => r + 1);
             onFeedback("Transaction recorded.");
+          }}
+        />
+      )}
+      {correction && account && (
+        <CorrectionDialog
+          transaction={correction.transaction}
+          deleting={correction.deleting}
+          instruments={metadata}
+          onClose={() => setCorrection(null)}
+          onCorrected={() => {
+            setCorrection(null);
+            setRevision((r) => r + 1);
+            onFeedback(
+              correction.deleting
+                ? "Transaction deleted."
+                : "Transaction updated.",
+            );
           }}
         />
       )}
