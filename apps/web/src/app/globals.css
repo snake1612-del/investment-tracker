@@ -404,3 +404,52 @@ form footer {
     flex-direction: column;
   }
 }
+/* Money stays exact and currency-partitioned, including on narrow screens. */
+.money-currencies {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  gap: 1rem;
+}
+.money-currency {
+  border: 1px solid #d3ded6;
+  border-radius: 12px;
+  padding: 1rem;
+  min-width: 0;
+}
+.money-balance {
+  display: block;
+  font-size: 1.6rem;
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+.money-currency dl div {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-block: 0.5rem;
+}
+.money-currency dl {
+  display: block;
+}
+.money-currency dt {
+  flex: 1;
+}
+.money-currency dd {
+  flex: 1;
+}
+.money-currency dd {
+  margin: 0;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+.toolbar [role="tablist"] {
+  max-width: 100%;
+  overflow-x: auto;
+  flex-wrap: nowrap;
+}
+.toolbar [role="tab"] {
+  flex-shrink: 0;
+}
+.relation-picker {
+  margin-block: 1rem;
+}

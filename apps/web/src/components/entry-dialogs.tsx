@@ -1,6 +1,21 @@
 "use client";
-import { useRef, useState, type FormEvent } from "react";
-import { api, ApiError, type Entity, type Position } from "../lib/api";
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import {
+  api,
+  ApiError,
+  type Entity,
+  type Position,
+  type Transaction,
+} from "../lib/api";
+import {
+  IncomeHelp,
+  RelationPicker,
+  isTrade,
+  isIncome,
+  isCharge,
+  relationError,
+  transactionPaths,
+} from "./transaction-context";
 import {
   decimalUnits,
   normalizeDecimal,
@@ -149,6 +164,7 @@ export function TransactionDialog({
   accountId,
   instruments,
   positions,
+  history = [],
   onClose,
   onRecorded,
   onInstrumentCreated,
@@ -156,6 +172,7 @@ export function TransactionDialog({
   accountId: number;
   instruments: Entity[];
   positions: Position[];
+  history?: Transaction[];
   onClose: () => void;
   onRecorded: () => void;
   onInstrumentCreated: (instrument: Entity) => void;
@@ -169,12 +186,17 @@ export function TransactionDialog({
     cash_amount: "",
   });
   const [instrument, setInstrument] = useState("");
+  const [related, setRelated] = useState("");
   const [search, setSearch] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const lock = useRef(false);
-  const trade = type !== "DEPOSIT";
+  const controller = useRef<AbortController | null>(null);
+  useEffect(() => () => controller.current?.abort(), []);
+  const trade = isTrade(type);
+  const income = isIncome(type);
+  const charge = isCharge(type);
   const current = positions.find((p) => String(p.instrument_id) === instrument);
   const requested = decimalUnits(values.quantity);
   const held = decimalUnits(current?.quantity ?? "0");
@@ -192,16 +214,26 @@ export function TransactionDialog({
     lock.current = true;
     setBusy(true);
     setError("");
+    const request = new AbortController();
+    controller.current = request;
     try {
-      const created = await api<Entity>("/instruments", { name });
+      const created = await api<Entity>(
+        "/instruments",
+        { name },
+        request.signal,
+      );
+      if (request.signal.aborted) return;
       onInstrumentCreated(created);
       setInstrument(String(created.id));
       setSearch("");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Unable to create Instrument.");
+      if (!request.signal.aborted)
+        setError(
+          e instanceof Error ? e.message : "Unable to create Instrument.",
+        );
     } finally {
       lock.current = false;
-      setBusy(false);
+      if (!request.signal.aborted) setBusy(false);
     }
   }
   async function submit(event: FormEvent) {
@@ -221,20 +253,46 @@ export function TransactionDialog({
       );
       if (issue) issues[key] = issue;
     }
-    if (trade && !instruments.some((i) => String(i.id) === instrument))
+    if (
+      (trade || income || (charge && instrument)) &&
+      !instruments.some((i) => String(i.id) === instrument)
+    )
       issues.instrument_id = "Select an Instrument.";
+    const invalidRelation = charge
+      ? relationError(history, related, instrument)
+      : undefined;
+    if (invalidRelation) issues.related_transaction_id = invalidRelation;
     setErrors(issues);
     setError("");
     if (Object.keys(issues).length) return;
     lock.current = true;
     setBusy(true);
+    const request = new AbortController();
+    controller.current = request;
     try {
       await api(
-        `/accounts/${accountId}/${type === "DEPOSIT" ? "deposits" : type === "BUY" ? "buys" : "sells"}`,
+        `/accounts/${accountId}/${transactionPaths[type]}`,
         {
           effective_date: values.effective_date,
           currency_code: values.currency_code.trim().toUpperCase(),
           cash_amount: normalizeDecimal(values.cash_amount),
+          ...(income
+            ? {
+                instrument_id: instruments.find(
+                  (i) => String(i.id) === instrument,
+                )!.id,
+              }
+            : {}),
+          ...(charge
+            ? {
+                instrument_id:
+                  instruments.find((i) => String(i.id) === instrument)?.id ??
+                  null,
+                related_transaction_id:
+                  history.find((item) => String(item.id) === related)?.id ??
+                  null,
+              }
+            : {}),
           ...(trade
             ? {
                 instrument_id: instruments.find(
@@ -245,16 +303,19 @@ export function TransactionDialog({
               }
             : {}),
         },
+        request.signal,
       );
-      onRecorded();
+      if (!request.signal.aborted) onRecorded();
     } catch (e) {
-      setError(
-        e instanceof Error ? e.message : "Unable to record transaction.",
-      );
-      if (e instanceof ApiError) setErrors(e.fields);
+      if (!request.signal.aborted) {
+        setError(
+          e instanceof Error ? e.message : "Unable to record transaction.",
+        );
+        if (e instanceof ApiError) setErrors(e.fields);
+      }
     } finally {
       lock.current = false;
-      setBusy(false);
+      if (!request.signal.aborted) setBusy(false);
     }
   }
   const visible = instruments.filter(
@@ -273,16 +334,33 @@ export function TransactionDialog({
               value={type}
               onChange={(e) => {
                 setType(e.target.value);
+                setInstrument("");
+                setRelated("");
+                setSearch("");
+                setValues((old) => ({ ...old, quantity: "", price: "" }));
                 setErrors({});
                 setError("");
               }}
             >
-              <option value="DEPOSIT">Deposit</option>
-              <option value="BUY">Buy</option>
-              <option value="SELL">Sell</option>
+              <optgroup label="Cash">
+                <option value="DEPOSIT">Deposit</option>
+                <option value="WITHDRAWAL">Withdrawal</option>
+              </optgroup>
+              <optgroup label="Trades">
+                <option value="BUY">Buy</option>
+                <option value="SELL">Sell</option>
+              </optgroup>
+              <optgroup label="Income">
+                <option value="DIVIDEND">Dividend</option>
+                <option value="COUPON">Coupon</option>
+              </optgroup>
+              <optgroup label="Charges">
+                <option value="FEE">Fee</option>
+                <option value="TAX">Tax</option>
+              </optgroup>
             </select>
           </label>
-          {trade && (
+          {(trade || income || charge) && (
             <div className="instrument-picker">
               <Field
                 label="Search or create Instrument"
@@ -291,14 +369,16 @@ export function TransactionDialog({
                 onChange={setSearch}
               />
               <label>
-                Instrument
+                {charge ? "Instrument (optional)" : "Instrument"}
                 <select
-                  aria-label="Instrument"
+                  aria-label={charge ? "Instrument (optional)" : "Instrument"}
                   value={instrument}
                   onChange={(e) => setInstrument(e.target.value)}
                   aria-invalid={!!errors.instrument_id}
                 >
-                  <option value="">Select Instrument</option>
+                  <option value="">
+                    {charge ? "None — account-level" : "Select Instrument"}
+                  </option>
                   {visible.map((i) => (
                     <option key={i.id} value={i.id}>
                       {i.name} · #{i.id}
@@ -356,7 +436,7 @@ export function TransactionDialog({
               </>
             )}
             <Field
-              label="Cash amount"
+              label={income ? "Gross amount" : "Cash amount"}
               name="cash_amount"
               decimal
               value={values.cash_amount}
@@ -364,6 +444,17 @@ export function TransactionDialog({
               error={errors.cash_amount}
             />
           </div>
+          {income && <IncomeHelp type={type} />}
+          {charge && (
+            <RelationPicker
+              history={history}
+              instruments={instruments}
+              value={related}
+              onChange={setRelated}
+              error={errors.related_transaction_id}
+              type={type}
+            />
+          )}
           {trade && (
             <p className="muted">
               Quantity, price and cash amount are independent facts. Cash may

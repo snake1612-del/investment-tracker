@@ -12,7 +12,7 @@ from app.application.corrections import (
     delete_manual_transaction,
     update_manual_transaction,
 )
-from app.application.use_cases import InvalidInput, NotFound, UowFactory
+from app.application.use_cases import NotFound, UowFactory
 from app.domain.transactions import InvalidTransaction, TransactionType
 
 DAY = date(2020, 1, 1)
@@ -92,14 +92,14 @@ def test_invalid_update_never_mutates_or_commits(kind: TransactionType) -> None:
 
 
 @pytest.mark.parametrize("operation", ["update", "delete"])
-@pytest.mark.parametrize("missing", ["account", "transaction", "unsupported"])
+@pytest.mark.parametrize("missing", ["account", "transaction"])
 def test_rejected_target_never_commits(operation: str, missing: str) -> None:
-    fake = uow(TransactionType.FEE if missing == "unsupported" else TransactionType.BUY)
+    fake = uow(TransactionType.BUY)
     if missing == "account":
         fake.accounts.get.return_value = None
     if missing == "transaction":
         fake.transactions.get_for_account.return_value = None
-    with pytest.raises(InvalidInput if missing == "unsupported" else NotFound):
+    with pytest.raises(NotFound):
         factory = cast(UowFactory, lambda: fake)
         if operation == "update":
             update_manual_transaction(

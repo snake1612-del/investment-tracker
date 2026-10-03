@@ -136,6 +136,32 @@ class TradeCorrectionRequest(DepositCorrectionRequest):
     settlement_date: date | None
 
 
+class WithdrawalCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    cash_amount: str
+    currency_code: str
+    effective_date: date
+    note: str | None = None
+
+
+class IncomeCreate(WithdrawalCreate):
+    instrument_id: int
+
+
+class ChargeCreate(WithdrawalCreate):
+    instrument_id: int | None = None
+    related_transaction_id: int | None = None
+
+
+class IncomeCorrectionRequest(DepositCorrectionRequest):
+    instrument_id: int
+
+
+class ChargeCorrectionRequest(DepositCorrectionRequest):
+    instrument_id: int | None
+    related_transaction_id: int | None
+
+
 class PositionRead(BaseModel):
     instrument_id: int
     instrument_name: str

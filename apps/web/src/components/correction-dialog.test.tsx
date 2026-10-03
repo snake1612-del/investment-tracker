@@ -14,6 +14,7 @@ const transaction: Transaction = {
   id: 7,
   account_id: 1,
   instrument_id: 2,
+  related_transaction_id: null,
   type: "BUY",
   effective_date: "2020-01-01",
   settlement_date: "2020-01-03",
@@ -180,7 +181,7 @@ it("shows a contextual DELETE conflict without closing or retrying", async () =>
   render(<CorrectionDialog {...settings} />);
   fireEvent.click(screen.getByRole("button", { name: "Delete permanently" }));
   expect(await screen.findByRole("alert")).toHaveTextContent(
-    "related canonical entry",
+    "Fee or Tax transaction is linked",
   );
   expect(settings.onCorrected).not.toHaveBeenCalled();
   expect(fetch).toHaveBeenCalledOnce();
@@ -193,7 +194,7 @@ it("does not offer unsupported History corrections", () => {
     remove = vi.fn();
   render(
     <History
-      transactions={[{ ...transaction, type: "FEE" }]}
+      transactions={[{ ...transaction, type: "FUTURE" }]}
       instruments={instruments}
       onEdit={edit}
       onDelete={remove}

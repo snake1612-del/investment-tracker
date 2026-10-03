@@ -58,6 +58,166 @@ class CanonicalTransaction:
     note: str | None = None
 
     @classmethod
+    def withdrawal(
+        cls,
+        account_id: int,
+        cash_amount: Decimal,
+        currency_code: str,
+        effective_date: date,
+        note: str | None = None,
+    ) -> CanonicalTransaction:
+        cls.deposit(account_id, cash_amount, currency_code, effective_date)
+        return cls(
+            account_id,
+            TransactionType.WITHDRAWAL,
+            cash_amount,
+            currency_code,
+            effective_date,
+            note=note,
+        )
+
+    @classmethod
+    def dividend(
+        cls,
+        account_id: int,
+        instrument_id: int,
+        cash_amount: Decimal,
+        currency_code: str,
+        effective_date: date,
+        note: str | None = None,
+    ) -> CanonicalTransaction:
+        return cls._income(
+            TransactionType.DIVIDEND,
+            account_id,
+            instrument_id,
+            cash_amount,
+            currency_code,
+            effective_date,
+            note,
+        )
+
+    @classmethod
+    def coupon(
+        cls,
+        account_id: int,
+        instrument_id: int,
+        cash_amount: Decimal,
+        currency_code: str,
+        effective_date: date,
+        note: str | None = None,
+    ) -> CanonicalTransaction:
+        return cls._income(
+            TransactionType.COUPON,
+            account_id,
+            instrument_id,
+            cash_amount,
+            currency_code,
+            effective_date,
+            note,
+        )
+
+    @classmethod
+    def _income(
+        cls,
+        kind: TransactionType,
+        account_id: int,
+        instrument_id: int,
+        cash_amount: Decimal,
+        currency_code: str,
+        effective_date: date,
+        note: str | None,
+    ) -> CanonicalTransaction:
+        if (
+            not isinstance(instrument_id, int)
+            or isinstance(instrument_id, bool)
+            or instrument_id <= 0
+        ):
+            raise InvalidTransaction("Income requires an Instrument identity")
+        cls.deposit(account_id, cash_amount, currency_code, effective_date)
+        return cls(
+            account_id,
+            kind,
+            cash_amount,
+            currency_code,
+            effective_date,
+            instrument_id=instrument_id,
+            note=note,
+        )
+
+    @classmethod
+    def fee(
+        cls,
+        account_id: int,
+        cash_amount: Decimal,
+        currency_code: str,
+        effective_date: date,
+        instrument_id: int | None = None,
+        related_transaction_id: int | None = None,
+        note: str | None = None,
+    ) -> CanonicalTransaction:
+        return cls._charge(
+            TransactionType.FEE,
+            account_id,
+            cash_amount,
+            currency_code,
+            effective_date,
+            instrument_id,
+            related_transaction_id,
+            note,
+        )
+
+    @classmethod
+    def tax(
+        cls,
+        account_id: int,
+        cash_amount: Decimal,
+        currency_code: str,
+        effective_date: date,
+        instrument_id: int | None = None,
+        related_transaction_id: int | None = None,
+        note: str | None = None,
+    ) -> CanonicalTransaction:
+        return cls._charge(
+            TransactionType.TAX,
+            account_id,
+            cash_amount,
+            currency_code,
+            effective_date,
+            instrument_id,
+            related_transaction_id,
+            note,
+        )
+
+    @classmethod
+    def _charge(
+        cls,
+        kind: TransactionType,
+        account_id: int,
+        cash_amount: Decimal,
+        currency_code: str,
+        effective_date: date,
+        instrument_id: int | None,
+        related_transaction_id: int | None,
+        note: str | None,
+    ) -> CanonicalTransaction:
+        for identity in (instrument_id, related_transaction_id):
+            if identity is not None and (
+                not isinstance(identity, int) or isinstance(identity, bool) or identity <= 0
+            ):
+                raise InvalidTransaction("Optional canonical identity must be a positive integer")
+        cls.deposit(account_id, cash_amount, currency_code, effective_date)
+        return cls(
+            account_id,
+            kind,
+            cash_amount,
+            currency_code,
+            effective_date,
+            instrument_id=instrument_id,
+            related_transaction_id=related_transaction_id,
+            note=note,
+        )
+
+    @classmethod
     def deposit(
         cls,
         account_id: int,

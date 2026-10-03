@@ -145,7 +145,7 @@ def test_wrong_account_and_missing_are_indistinguishable(client: TestClient, met
 
 
 @pytest.mark.parametrize("kind", ["WITHDRAWAL", "DIVIDEND", "COUPON", "FEE", "TAX"])
-def test_unsupported_types_not_mutable(
+def test_new_types_reject_trade_correction_shape(
     client: TestClient,
     clean_db: sessionmaker[Session],
     kind: str,
@@ -159,7 +159,8 @@ def test_unsupported_types_not_mutable(
         session.commit()
     url = f"/accounts/{account}/transactions/{trade['id']}"
     assert client.put(url, json=body(instrument)).status_code == 422
-    assert client.delete(url).status_code == 422
+    # F007 extends deletion to all eight types, but never changes persisted type via a trade PUT.
+    assert client.delete(url).status_code == 204
 
 
 @pytest.mark.parametrize(
