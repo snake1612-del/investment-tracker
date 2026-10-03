@@ -29,9 +29,22 @@ The revised MVP v0.1 is a usable personal manual investment journal. Manual Port
 - [Product definition](PRODUCT.md)
 - [Decision log](docs/DECISIONS.md)
 - [Financial methodology](docs/CALCULATIONS.md)
+- [Local runtime and operations](docs/OPERATIONS.md)
 - [Repository workflow](AGENTS.md)
 
 ## Development
+
+### Local Docker (recommended)
+
+With Docker Desktop running, from the repository root:
+
+```bash
+docker compose up --build
+```
+
+Open `http://localhost:3000`; the API is at `http://localhost:8000` and PostgreSQL at `127.0.0.1:55432`. API startup applies Alembic migrations before serving; both source trees hot-reload. Stop with `docker compose down` to preserve database data. See [OPERATIONS](docs/OPERATIONS.md) for logs, rebuilds, persistence and isolated testing.
+
+Cloud runtime remains pending provisioning, blocked by Supabase project quota. The following host-run workflows remain available; tests/E2E must use the disposable test database, never the normal Docker API/database.
 
 The project requires Node.js 24, pnpm, Python 3.14, and uv. New financial semantics and durable architectural changes require approved decisions; ordinary implementation details follow the existing rules in [AGENTS.md](AGENTS.md).
 
