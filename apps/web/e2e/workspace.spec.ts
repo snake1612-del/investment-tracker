@@ -1,5 +1,134 @@
 import { expect, test, type Page } from "@playwright/test";
 
+test("cash income and linked Tax corrections remain exact with safe parent deletion", async ({
+  page,
+}, testInfo) => {
+  const browserErrors: string[] = [];
+  page.on("pageerror", (error) => browserErrors.push(error.message));
+  const suffix = await createContext(page);
+  await page
+    .getByRole("button", { name: "Record transaction", exact: true })
+    .click();
+  let dialog = page.getByRole("dialog");
+  await dialog.getByLabel("Transaction type").selectOption("DIVIDEND");
+  await expect(dialog).toContainText("If you only know the net amount");
+  await dialog
+    .getByLabel("Search or create Instrument")
+    .fill(`Income ${suffix}`);
+  await dialog.getByRole("button", { name: /^Create Instrument/ }).click();
+  await expect(
+    dialog.getByLabel("Instrument", { exact: true }),
+  ).not.toHaveValue("");
+  await dialog.getByLabel("Effective date").fill("2020-01-01");
+  await dialog.getByLabel("Currency", { exact: true }).fill("USD");
+  await dialog.getByLabel("Gross amount").fill("100");
+  await page.screenshot({
+    path: testInfo.outputPath("income-dialog.png"),
+    fullPage: true,
+  });
+  await dialog
+    .getByRole("button", { name: "Record transaction", exact: true })
+    .click();
+  await expect(dialog).toHaveCount(0);
+  await page
+    .getByRole("button", { name: "Record transaction", exact: true })
+    .click();
+  dialog = page.getByRole("dialog");
+  await dialog.getByLabel("Transaction type").selectOption("TAX");
+  await dialog.getByLabel("Effective date").fill("2020-01-01");
+  await dialog.getByLabel("Currency", { exact: true }).fill("USD");
+  await dialog.getByLabel("Cash amount").fill("13");
+  await dialog
+    .getByLabel("Search related transactions")
+    .fill(`Income ${suffix}`);
+  const picker = dialog.getByLabel("Related transaction (optional)");
+  const parentLabel = (await picker.locator("option").allTextContents()).find(
+    (text) => text.startsWith("Dividend ·"),
+  )!;
+  await picker.selectOption({ label: parentLabel });
+  await expect(dialog.getByLabel("Instrument (optional)")).toHaveValue("");
+  await dialog
+    .getByRole("button", { name: "Record transaction", exact: true })
+    .click();
+  await expect(dialog).toHaveCount(0);
+  await page.getByRole("tab", { name: "Money", exact: true }).click();
+  await page.getByLabel("As of date").fill("2020-01-01");
+  const money = page.locator(".money-currency");
+  await expect(money.locator(".money-balance")).toHaveText("87 USD");
+  await expect(
+    money.locator("dl div").filter({ hasText: "Gross dividend income" }),
+  ).toContainText("100 USD");
+  await expect(
+    money.locator("dl div").filter({ hasText: "Gross investment income" }),
+  ).toContainText("100 USD");
+  await expect(
+    money.locator("dl div").filter({ hasText: "Taxes paid or withheld" }),
+  ).toContainText("13 USD");
+  await page.screenshot({
+    path: testInfo.outputPath("money.png"),
+    fullPage: true,
+  });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true);
+  await page.getByRole("tab", { name: "History", exact: true }).click();
+  const rows = page.locator(
+    ".history-table tbody tr:visible, .history-mobile article:visible",
+  );
+  const tax = rows.filter({ hasText: "Tax" });
+  const dividend = rows
+    .filter({ hasText: "Dividend" })
+    .filter({ hasNotText: "Tax" });
+  await tax.getByRole("button", { name: "Edit", exact: true }).click();
+  dialog = page.getByRole("dialog");
+  await dialog.getByLabel("Related transaction (optional)").selectOption("");
+  await dialog.getByLabel("Cash amount").fill("10");
+  await dialog.getByRole("button", { name: "Save changes" }).click();
+  await expect(dialog).toHaveCount(0);
+  await page.getByRole("tab", { name: "Money", exact: true }).click();
+  await expect(page.getByLabel("As of date")).toHaveValue("2020-01-01");
+  await expect(money.locator(".money-balance")).toHaveText("90 USD");
+  await page.getByRole("tab", { name: "History", exact: true }).click();
+  await tax.getByRole("button", { name: "Edit", exact: true }).click();
+  dialog = page.getByRole("dialog");
+  await dialog
+    .getByLabel("Related transaction (optional)")
+    .selectOption({ label: parentLabel });
+  await dialog.getByRole("button", { name: "Save changes" }).click();
+  await expect(dialog).toHaveCount(0);
+  await dividend.getByRole("button", { name: "Delete", exact: true }).click();
+  dialog = page.getByRole("dialog");
+  await dialog.getByRole("button", { name: "Delete permanently" }).click();
+  await expect(dialog.getByRole("alert")).toContainText("Nothing was removed");
+  await expect(dialog.getByRole("alert")).toContainText(
+    "Fee or Tax transaction is linked",
+  );
+  await dialog.getByRole("button", { name: "Close dialog" }).click();
+  await expect(dividend).toHaveCount(1);
+  await tax.getByRole("button", { name: "Edit", exact: true }).click();
+  dialog = page.getByRole("dialog");
+  await dialog.getByLabel("Related transaction (optional)").selectOption("");
+  await dialog.getByRole("button", { name: "Save changes" }).click();
+  await expect(dialog).toHaveCount(0);
+  await dividend.getByRole("button", { name: "Delete", exact: true }).click();
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "Delete permanently" })
+    .click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await page.getByRole("tab", { name: "Money", exact: true }).click();
+  await expect(money.locator(".money-balance")).toHaveText("−10 USD");
+  await page.getByLabel("Account", { exact: true }).selectOption("summary");
+  await page.getByRole("tab", { name: "Money", exact: true }).click();
+  await expect(money.locator(".money-balance")).toHaveText("−10 USD");
+  expect(browserErrors).toEqual([]);
+  await expect(
+    page.locator("[data-nextjs-dialog], .vite-error-overlay"),
+  ).toHaveCount(0);
+});
+
 async function createContext(page: Page) {
   const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   await page.goto("/");
@@ -88,8 +217,8 @@ test("complete manual journal journey without API or manual IDs", async ({
   await record(page, "Deposit", "1000");
   await record(page, "Buy", "12", `Fund ${suffix}`, "2");
   await page.getByRole("tab", { name: "History", exact: true }).click();
-  await expect(page.getByRole("tabpanel")).toContainText("DEPOSIT");
-  await expect(page.getByRole("tabpanel")).toContainText("BUY");
+  await expect(page.getByRole("tabpanel")).toContainText("Deposit");
+  await expect(page.getByRole("tabpanel")).toContainText("Buy");
   await expect(page.getByRole("tabpanel")).toContainText("12.00000000");
   await page.getByRole("tab", { name: "Holdings", exact: true }).click();
   await expect(page.getByRole("table")).toContainText(`Fund ${suffix}`);
@@ -141,7 +270,7 @@ test("corrects and deletes consumed acquisitions through History", async ({
   await page.getByRole("tab", { name: "History", exact: true }).click();
   const buy = page
     .locator(".history-table tbody tr:visible, .history-mobile article:visible")
-    .filter({ hasText: "BUY" });
+    .filter({ hasText: "Buy" });
   await buy.getByRole("button", { name: "Edit", exact: true }).click();
   let dialog = page.getByRole("dialog");
   await expect(dialog.getByLabel("Cash amount")).toHaveValue("12.00000000");

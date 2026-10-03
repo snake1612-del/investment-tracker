@@ -3472,3 +3472,31 @@ An Account-scoped full correction contract provides browser journal correction w
 **Consequences**
 
 No migration, soft delete, audit/versioning, revision table, reversal model, generic CRUD framework, derived cache or financial-engine change is introduced. Corrected facts immediately become the source for existing deterministic derived reads. Concurrent stale-tab writes are an accepted v0.1 limitation.
+
+## Decision 018 — Cash, income and outflow capability
+
+**Decision**
+
+Implement F007/F008 as one complete Account-centric browser capability, extending the existing manual journal and correction boundaries without redesigning them. Decisions 001–017 remain historical approved records; Decision 018 extends Decision 017's original correction scope to all eight canonical types and permits Instrument/relation corrections for Fee/Tax.
+
+Use separate strong domain constructors and application create use cases for WITHDRAWAL, DIVIDEND, COUPON, FEE and TAX. Add Account-scoped POST /withdrawals, /dividends, /coupons, /fees and /taxes (201 TransactionRead). Withdrawal accepts cash/currency/date and optional note; income also requires Instrument; charges permit nullable optional Instrument/relation. Reject extra fields and trade-only quantity/price/settlement. Do not introduce a generic transaction-create API.
+
+Existing PUT/DELETE /accounts/{account_id}/transactions/{transaction_id} support all eight persisted types. PUT is complete factual replacement with type-specific shapes, not PATCH: cash-flow date/currency/cash; income adds required Instrument; Fee/Tax adds required-but-nullable Instrument and related_transaction_id; trades retain existing full shape including required nullable settlement_date. Extra fields, omitted required fields and mismatched persisted-type shapes are invalid. Keep identity, Account, type, created_at and note; explicitly update UTC updated_at only on success. Fee/Tax nulls explicitly clear links. Existing inbound restrictive FK surfaces 409, without a new conflict model.
+
+Mutation application logic validates Account, Instrument if provided, relation if provided, and the appropriate domain constructor, then persists and commits once through the existing UoW. Wrong-Account relations use the same 404 as missing parents. Invalid charge parents/self-relations/Instrument mismatch use 422. Repositories perform no independent commit. No financial engines are invoked during mutations.
+
+Add GET /accounts/{account_id}/money-summary and GET /portfolios/{portfolio_id}/money-summary with required as_of_date=YYYY-MM-DD. There is no implicit server-today or from/to window. Existing resources without included activity return 200 with empty currencies; missing resources return 404. Malformed history is an internal failure, not request 422. Load canonical history once per Account and call pure F008 reconstruction. Portfolio reads reconstruct each Account before same-currency aggregation. Return {as_of_date, currencies}, with all monetary fields exact normalized decimal strings and sorted currency codes. Keep existing F005 rational API unchanged.
+
+The browser extends existing Record/Edit/Delete dialogs and History, not a parallel CRUD subsystem. Record type selection groups Cash, Trades, Income and Charges. Income uses Gross amount plus visible gross/withholding/net-only guidance. Fee/Tax have explicit optional Instrument (None — account-level), optional relation (None — standalone), and a searchable native keyboard-accessible picker from loaded Account History excluding Fee/Tax parents. Labels include type/date/Instrument/cash/currency/identity. Never silently change Instrument when selecting a parent; explicit non-null mismatch is inline invalid. Relations visibly explain context-only semantics.
+
+Account tabs are Holdings, History, Money and Realised result; Portfolio tabs are Holdings, Money and Realised result. Money groups per-currency recorded cash balance, external flows, trading cash, gross investment income/dividend/coupon, and separate Fee/Tax totals. No cross-currency, net-income or combined-expense total. A labelled native as-of date starts at browser-local today, fetches only Money immediately on a valid change, persists across tabs within the same context and resets on Account/Portfolio context change. It has no Apply button, date range or persisted storage. Future cutoffs are valid. Render exact strings with grouped integer digits, Unicode minus and currency, never Number, parseFloat or approximation. Retain loading/empty/error/stale guards, active zero and normal negative balances. Malformed monetary payloads fail safely.
+
+History uses readable labels and type-specific details without irrelevant nullable columns; all eight types expose Edit/Delete. Successful mutations refresh History, Holdings, Money and Realised result; Portfolio summary is fetched fresh on entry. Preserve duplicate-submit locks, abort/unmount and stale-context guards. Provide understandable relation-conflict deletion guidance with explicit assurance that nothing was removed. Narrow layouts retain stacked dialogs/cards, horizontally scrollable tabs and readable per-currency Money sections.
+
+**Reason**
+
+The existing canonical model already represents all eight monetary events and optional relations. Separate factual entry, exact read reconstruction and current-history correction make income/outflows usable without prematurely adding net-return, fee allocation, FX or settlement semantics.
+
+**Consequences**
+
+No schema migration is required or introduced. No financial snapshots/caches, new tables/flags, generic transaction framework, relation-candidate endpoint, audit/revision model, dependencies, authentication redesign, valuation/performance, imports or integrations are added. Existing F001–F006 and F003–F005 golden regressions remain substantively unchanged. Tests cover strong event validation, atomic relation/correction behavior, exact scale-eight reconstruction and wire output, Account-first Portfolio reads, unchanged F005 gross results, browser lifecycle/date behavior and complete desktop/narrow journeys.

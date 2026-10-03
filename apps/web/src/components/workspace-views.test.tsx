@@ -171,6 +171,7 @@ describe("workspace financial views", () => {
       id: 1,
       account_id: 1,
       instrument_id: null,
+      related_transaction_id: null,
       settlement_date: null,
       type: "DEPOSIT",
       effective_date: "2026-01-01",
@@ -202,6 +203,6 @@ describe("workspace financial views", () => {
     expect(rows[1]).toHaveTextContent("Transaction #3");
     expect(rows[1]).toHaveTextContent("99");
     expect(rows[2]).toHaveTextContent("Transaction #2");
-    expect(rows[3]).toHaveTextContent("—");
+    expect(rows[3]).toHaveTextContent("External cash flow");
   });
 });

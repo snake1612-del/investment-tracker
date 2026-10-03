@@ -12,6 +12,7 @@ export type Transaction = {
   id: number;
   account_id: number;
   instrument_id: number | null;
+  related_transaction_id: number | null;
   type: string;
   effective_date: string;
   settlement_date: string | null;

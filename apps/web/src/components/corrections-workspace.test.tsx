@@ -48,6 +48,7 @@ it.each(["PUT", "DELETE"])(
                   id: 7,
                   account_id: 3,
                   instrument_id: 2,
+                  related_transaction_id: null,
                   type: "BUY",
                   effective_date: "2020-01-01",
                   settlement_date: null,
@@ -79,7 +80,7 @@ it.each(["PUT", "DELETE"])(
       expect(screen.getByLabelText("Account")).toHaveValue("3"),
     );
     fireEvent.click(screen.getByRole("tab", { name: "History" }));
-    const row = await screen.findByRole("row", { name: /BUY/ });
+    const row = await screen.findByRole("row", { name: /Buy/ });
     fireEvent.click(
       within(row).getByRole("button", {
         name: method === "PUT" ? "Edit" : "Delete",
@@ -99,6 +100,11 @@ it.each(["PUT", "DELETE"])(
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
       for (const path of ["transactions", "positions", "realised-pnl"])
         expect(reads).toContain(`/api/accounts/3/${path}`);
+      expect(
+        reads.some((path) =>
+          path.startsWith("/api/accounts/3/money-summary?as_of_date="),
+        ),
+      ).toBe(true);
     });
     expect(screen.getByLabelText("Account")).toHaveValue("3");
     if (method === "DELETE")
@@ -107,13 +113,20 @@ it.each(["PUT", "DELETE"])(
       ).toBeInTheDocument();
     else
       expect(
-        within(screen.getByRole("row", { name: /BUY/ })).getByText("3"),
+        within(screen.getByRole("row", { name: /Buy/ })).getByText(
+          /Quantity 3/,
+        ),
       ).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Account"), {
       target: { value: "summary" },
     });
     await waitFor(() => expect(reads).toContain("/api/portfolios/1/positions"));
     expect(reads).toContain("/api/portfolios/1/realised-pnl");
+    expect(
+      reads.some((path) =>
+        path.startsWith("/api/portfolios/1/money-summary?as_of_date="),
+      ),
+    ).toBe(true);
     expect(
       screen.queryByRole("tab", { name: "History" }),
     ).not.toBeInTheDocument();

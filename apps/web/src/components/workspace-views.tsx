@@ -6,6 +6,12 @@ import type {
   Unresolved,
 } from "../lib/api";
 import { decimalUnits, formatMoney, parseMoney } from "../lib/exact-money";
+import {
+  transactionLabels,
+  isTrade,
+  isCharge,
+  relationLabel,
+} from "./transaction-context";
 
 export function Holdings({
   positions,
@@ -82,7 +88,7 @@ export function History({
     return (
       <div className="empty">
         <h3>No transactions yet</h3>
-        <p>Record your first deposit, buy or sell.</p>
+        <p>Record your first transaction.</p>
       </div>
     );
   const ordered = [...transactions].sort(
@@ -93,7 +99,7 @@ export function History({
       ? "—"
       : `${instruments.find((i) => i.id === id)?.name ?? "Instrument"} · #${id}`;
   const actions = (t: Transaction) =>
-    ["DEPOSIT", "BUY", "SELL"].includes(t.type) && (
+    Object.hasOwn(transactionLabels, t.type) && (
       <>
         {onEdit && (
           <button className="secondary" onClick={() => onEdit(t)}>
@@ -107,23 +113,45 @@ export function History({
         )}
       </>
     );
+  const details = (t: Transaction) => (
+    <>
+      {t.instrument_id !== null ? (
+        <span>{name(t.instrument_id)}</span>
+      ) : isCharge(t.type) ? (
+        <span>Account-level</span>
+      ) : (
+        <span>External cash flow</span>
+      )}
+      {isTrade(t.type) && (
+        <small>
+          Quantity {t.quantity} · Price {t.price} {t.currency_code}
+        </small>
+      )}
+      {isCharge(t.type) && t.related_transaction_id != null && (
+        <small>
+          Related:{" "}
+          {transactions.find((item) => item.id === t.related_transaction_id)
+            ? relationLabel(
+                transactions.find(
+                  (item) => item.id === t.related_transaction_id,
+                )!,
+                instruments,
+              )
+            : `Transaction #${t.related_transaction_id}`}
+        </small>
+      )}
+    </>
+  );
   return (
     <>
       <table className="history-table">
         <thead>
           <tr>
-            {[
-              "Effective date",
-              "Type",
-              "Instrument",
-              "Quantity",
-              "Price",
-              "Cash amount",
-              "Currency",
-              "Actions",
-            ].map((label) => (
-              <th key={label}>{label}</th>
-            ))}
+            {["Date", "Type", "Details", "Cash amount", "Actions"].map(
+              (label) => (
+                <th key={label}>{label}</th>
+              ),
+            )}
           </tr>
         </thead>
         <tbody>
@@ -133,12 +161,11 @@ export function History({
                 {t.effective_date}
                 <small>Transaction #{t.id}</small>
               </td>
-              <td>{t.type}</td>
-              <td>{name(t.instrument_id)}</td>
-              <td>{t.quantity ?? "—"}</td>
-              <td>{t.price ?? "—"}</td>
-              <td>{t.cash_amount}</td>
-              <td>{t.currency_code}</td>
+              <td>{transactionLabels[t.type] ?? t.type}</td>
+              <td>{details(t)}</td>
+              <td>
+                {t.cash_amount} {t.currency_code}
+              </td>
               <td>{actions(t)}</td>
             </tr>
           ))}
@@ -148,15 +175,11 @@ export function History({
         {ordered.map((t) => (
           <article key={t.id}>
             <header>
-              <strong>{t.type}</strong>
+              <strong>{transactionLabels[t.type] ?? t.type}</strong>
               <span>{t.effective_date}</span>
             </header>
-            <p>{name(t.instrument_id)}</p>
+            <div>{details(t)}</div>
             <dl>
-              <dt>Quantity</dt>
-              <dd>{t.quantity ?? "—"}</dd>
-              <dt>Price</dt>
-              <dd>{t.price ?? "—"}</dd>
               <dt>Cash amount</dt>
               <dd>
                 {t.cash_amount} {t.currency_code}

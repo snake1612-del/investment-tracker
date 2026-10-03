@@ -1068,3 +1068,58 @@ The manual journal must allow factual entry mistakes to be corrected before regu
 ## Consequences
 
 The approved correction scope is DEPOSIT / BUY / SELL only. Existing identity, type, Account, note and canonical relations remain unchanged by an edit. There is no reversal model, audit trail or revision history. All existing reconstructions operate on current facts; F001–F005 remain unchanged.
+
+# Decision F007 — Manual cash, income and outflow transaction semantics
+
+## Decision
+
+Manual entry and corrections now support all eight existing canonical types. This extends F006's original three-type scope without changing F001–F005 or introducing a new canonical model.
+
+WITHDRAWAL is an external cash outflow. DIVIDEND and COUPON are gross investment income associated with a required Instrument. FEE and TAX are separate outflows, either account-level or associated with an optional Instrument. TAX represents actual paid or withheld tax only, never estimated liability, tax forecast or an automatically calculated tax.
+
+Each new manual event requires a positive finite exact Decimal cash_amount, exactly representable as NUMERIC(24,8), a currency_code matching uppercase ASCII `[A-Z]{3}`, and a factual effective_date. Historical entry is allowed. Quantity, price and settlement_date are not inputs for these five types. Note is optional on create and remains unchanged by correction. WITHDRAWAL has no Instrument. No holdings or cash-sufficiency validation is imposed. A negative reconstructed cash balance is valid recorded state, not a mutation error.
+
+DIVIDEND/COUPON cash_amount is the gross monetary leg before separately recorded withholding. When gross income and withholding are known, record gross income and a separate TAX. Net-only source data cannot yet be entered accurately; do not infer gross income, assume zero withholding, or record net income plus a TAX that double-counts withholding.
+
+## Fee/Tax relations
+
+Only manual FEE/TAX expose optional related_transaction_id. The parent must exist within the same Account and cannot be FEE or TAX. A missing or wrong-Account parent is indistinguishable (404); invalid parent type, direct self-reference on correction, and incompatible non-null Instruments are invalid input (422). If both child and parent have an Instrument, they must match. A null child Instrument remains account-level and is not inferred from the parent. The currencies may differ. Multiple Fee/Tax children may reference one parent.
+
+The relation records provenance/context only. It does not merge monetary legs, rewrite the parent, change signs, allocate fees/taxes into acquisition basis, modify F005 gross realised P&L, or perform FX conversion. Each transaction retains its own currency, amount and effective date.
+
+## Corrections and deletion
+
+All eight types are editable current best-known canonical facts. Persisted type is authoritative and immutable, as are ID, Account, created_at and note. Success explicitly refreshes UTC updated_at; rejection changes neither facts nor lifecycle metadata. Existing strong create validation is reused. Cash-flow corrections replace date/currency/cash; income corrections also replace required Instrument; Fee/Tax corrections replace both optional Instrument and relation, with explicit null clearing either. Trade corrections retain F002 independent quantity, price and cash and required-but-nullable settlement_date.
+
+Hard deletion removes the canonical event. Derived holdings, FIFO matches or realised results do not prevent correction/deletion. Inbound canonical relations remain protected by the existing restrictive FK: conflict is 409, with rollback and no deletion, cascade, detachment or automatic nulling. Clear/change the child relation or delete the child explicitly before deleting its parent. Current history is reconstructed on subsequent reads, including historical results.
+
+## Consequences
+
+F006's original correction-type and uneditable-relation restrictions are extended only for the newly supported manual types and editable Fee/Tax relation. No reversal, soft deletion, audit/revision model, net-income calculation, net/fee-adjusted P&L, tax engine, FX, settled cash accounting, imports or new financial semantics are introduced.
+
+# Decision F008 — Cash and income/outflow reconstruction
+
+## Decision
+
+Money is computed from canonical Account history for an explicit as_of_date. Include transactions exactly when effective_date <= as_of_date. Settlement dates are ignored: recorded cash is not broker-reported available cash or settled cash. Order does not change sums. Reconstruct each Account independently; Portfolio aggregation combines those Account summaries only within each currency, without an FX total.
+
+Cash effects use factual cash_amount, never quantity × price:
+
+```text
+DEPOSIT +cash; WITHDRAWAL -cash; BUY -cash; SELL +cash;
+DIVIDEND +cash; COUPON +cash; FEE -cash; TAX -cash.
+```
+
+Every current type has an explicit rule. Unknown future types and malformed canonical cash/currency or impossible canonical state fail explicitly as internal reconstruction invariants; do not silently skip them or substitute zero. Negative cash is valid. Preserve an active currency bucket even when its balance is exactly zero. No included transactions means an empty currency collection, not a guessed zero balance.
+
+## Exactness and output
+
+Canonical cash uses scale eight. Reconstruction uses arbitrary-size integer units of 10^-8 and exact context-independent conversion. Do not accumulate in ambient Decimal context, use binary floating point, round, truncate, or quantize away factual precision. Aggregate totals may exceed NUMERIC(24,8) input capacity and must remain exact.
+
+Each active currency exposes: currency_code, cash_balance, deposits, withdrawals, buy_trade_cash_outflow, sell_trade_cash_inflow, gross_dividend_income, gross_coupon_income, gross_investment_income, fees_paid, taxes_paid_or_withheld. Category totals are positive magnitudes; only cash_balance applies directional signs. Gross investment income is exactly gross dividend plus gross coupon income. Fees and taxes are separate totals, not a combined expense, net income or net P&L metric.
+
+Public amounts are normalized ordinary decimal strings with at most eight fractional digits: no exponent, leading plus, unnecessary integer zeroes, trailing fractional zeroes or negative zero; exact zero is `"0"`. Derived integer parts are not restricted to canonical storage width. Output currencies are sorted ascending. F005's exact rational wire representation and GROSS_TRADE_CASH_REALISED_PNL methodology remain unchanged; Fee/Tax affect Money but not gross trade-cash realised P&L.
+
+## Consequences
+
+Money remains reconstruct-on-read with no snapshot, cache, materialized balance or database migration. Corrections/deletions cause deterministic reconstruction from current history. No cash sufficiency, settled-cash model, FX, tax liability, valuation, performance, net-income/net-P&L or fee-to-basis treatment is defined.

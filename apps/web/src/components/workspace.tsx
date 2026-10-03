@@ -8,7 +8,13 @@ import {
   type Realised,
   type Transaction,
 } from "../lib/api";
-import { EntityDialog, TransactionDialog } from "./entry-dialogs";
+import {
+  EntityDialog,
+  TransactionDialog,
+  localDate,
+  dateError,
+} from "./entry-dialogs";
+import { MoneyView, type MoneySummary } from "./money-view";
 import { CorrectionDialog } from "./correction-dialog";
 import { History, Holdings, RealisedResult } from "./workspace-views";
 
@@ -299,6 +305,7 @@ function AccountWorkspace({
   onFeedback: (message: string) => void;
 }) {
   const [tab, setTab] = useState("Holdings");
+  const [asOf, setAsOf] = useState(localDate);
   const [revision, setRevision] = useState(0);
   const [recording, setRecording] = useState(false);
   const [correction, setCorrection] = useState<{
@@ -316,12 +323,22 @@ function AccountWorkspace({
     : `/portfolios/${portfolio.id}`;
   const positions = useRead<Position[]>(`${scope}/positions`, revision);
   const result = useRead<Realised>(`${scope}/realised-pnl`, revision);
+  const money = useRead<MoneySummary>(
+    dateError(asOf) ? null : `${scope}/money-summary?as_of_date=${asOf}`,
+    revision,
+  );
   const history = useRead<Transaction[]>(
     account ? `${scope}/transactions` : null,
     revision,
   );
   const active =
-    tab === "Holdings" ? positions : tab === "History" ? history : result;
+    tab === "Holdings"
+      ? positions
+      : tab === "History"
+        ? history
+        : tab === "Money"
+          ? money
+          : result;
   return (
     <section className="account-workspace">
       <div className="workspace-heading">
@@ -332,7 +349,11 @@ function AccountWorkspace({
         {account && (
           <button
             disabled={
-              positions.loading || instruments.loading || !!instruments.error
+              positions.loading ||
+              instruments.loading ||
+              !!instruments.error ||
+              history.loading ||
+              !!history.error
             }
             onClick={() => setRecording(true)}
           >
@@ -343,8 +364,8 @@ function AccountWorkspace({
       <div className="toolbar">
         <div role="tablist" aria-label="Workspace views">
           {(account
-            ? ["Holdings", "History", "Realised result"]
-            : ["Holdings", "Realised result"]
+            ? ["Holdings", "History", "Money", "Realised result"]
+            : ["Holdings", "Money", "Realised result"]
           ).map((name) => (
             <button
               key={name}
@@ -384,7 +405,32 @@ function AccountWorkspace({
         className="panel"
         aria-busy={active.loading}
       >
-        {active.loading ? (
+        {tab === "Money" ? (
+          <>
+            <MoneyView
+              data={money.data}
+              asOf={asOf}
+              setAsOf={setAsOf}
+              account={!!account}
+              noHistory={history.data?.length === 0}
+              onRecord={
+                account &&
+                !history.loading &&
+                !history.error &&
+                !instruments.loading &&
+                !instruments.error
+                  ? () => setRecording(true)
+                  : undefined
+              }
+            />
+            {money.loading && <p role="status">Loading Money…</p>}
+            {money.error && (
+              <p className="error" role="alert">
+                {money.error} Use Refresh to retry.
+              </p>
+            )}
+          </>
+        ) : active.loading ? (
           <p role="status">Loading {tab.toLowerCase()}…</p>
         ) : active.error ? (
           <p className="error" role="alert">
@@ -416,6 +462,7 @@ function AccountWorkspace({
           accountId={account.id}
           positions={positions.data ?? []}
           instruments={metadata}
+          history={history.data ?? []}
           onClose={() => setRecording(false)}
           onInstrumentCreated={(entity) => {
             setCreatedInstruments((old) => [...old, entity]);
@@ -433,6 +480,7 @@ function AccountWorkspace({
           transaction={correction.transaction}
           deleting={correction.deleting}
           instruments={metadata}
+          history={history.data ?? []}
           onClose={() => setCorrection(null)}
           onCorrected={() => {
             setCorrection(null);

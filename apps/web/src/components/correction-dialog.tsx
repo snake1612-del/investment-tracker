@@ -4,21 +4,37 @@ import { api, ApiError, type Entity, type Transaction } from "../lib/api";
 import { normalizeDecimal, positiveDecimalError } from "../lib/exact-money";
 import { Dialog } from "./dialog";
 import { dateError, Field } from "./entry-dialogs";
+import {
+  IncomeHelp,
+  RelationPicker,
+  isTrade,
+  isIncome,
+  isCharge,
+  relationError,
+  transactionLabels,
+} from "./transaction-context";
 
 export function CorrectionDialog({
   transaction,
   instruments,
+  history = [],
   deleting,
   onClose,
   onCorrected,
 }: {
   transaction: Transaction;
   instruments: Entity[];
+  history?: Transaction[];
   deleting: boolean;
   onClose: () => void;
   onCorrected: () => void;
 }) {
-  const trade = transaction.type !== "DEPOSIT";
+  const trade = isTrade(transaction.type);
+  const income = isIncome(transaction.type);
+  const charge = isCharge(transaction.type);
+  const [related, setRelated] = useState(
+    String(transaction.related_transaction_id ?? ""),
+  );
   const [values, setValues] = useState({
     effective_date: transaction.effective_date,
     settlement_date: transaction.settlement_date ?? "",
@@ -67,6 +83,15 @@ export function CorrectionDialog({
               "Settlement cannot precede the effective date.";
         }
       }
+      if (
+        (income || (charge && instrument)) &&
+        !instruments.some((i) => String(i.id) === instrument)
+      )
+        issues.instrument_id = "Select an Instrument.";
+      const invalidRelation = charge
+        ? relationError(history, related, instrument)
+        : undefined;
+      if (invalidRelation) issues.related_transaction_id = invalidRelation;
     }
     setErrors(issues);
     setError("");
@@ -84,6 +109,23 @@ export function CorrectionDialog({
               effective_date: values.effective_date,
               currency_code: values.currency_code.trim().toUpperCase(),
               cash_amount: normalizeDecimal(values.cash_amount),
+              ...(income
+                ? {
+                    instrument_id: instruments.find(
+                      (i) => String(i.id) === instrument,
+                    )!.id,
+                  }
+                : {}),
+              ...(charge
+                ? {
+                    instrument_id:
+                      instruments.find((i) => String(i.id) === instrument)
+                        ?.id ?? null,
+                    related_transaction_id:
+                      history.find((item) => String(item.id) === related)?.id ??
+                      null,
+                  }
+                : {}),
               ...(trade
                 ? {
                     instrument_id: instruments.find(
@@ -103,7 +145,7 @@ export function CorrectionDialog({
       if (!request.signal.aborted) {
         setError(
           e instanceof ApiError && e.status === 409 && deleting
-            ? "This entry could not be deleted because a related canonical entry still references it. Nothing was removed."
+            ? "This transaction can’t be deleted while a Fee or Tax transaction is linked to it. Edit that Fee/Tax to clear or change the link, or delete it first. Nothing was removed."
             : e instanceof Error
               ? e.message
               : "Unable to correct transaction.",
@@ -122,29 +164,32 @@ export function CorrectionDialog({
       onClose={onClose}
     >
       <p>
-        {transaction.type} · Transaction #{transaction.id} · Account #
-        {transaction.account_id}
+        {transactionLabels[transaction.type] ?? transaction.type} · Transaction
+        #{transaction.id} · Account #{transaction.account_id}
       </p>
       <p className="notice">
         {deleting
           ? "This permanently deletes the journal entry. There is no undo."
           : "This replaces the recorded facts in place."}{" "}
-        Holdings, FIFO acquisition basis and realised results may change or
-        become incomplete. Existing sells do not prevent correction.
+        {trade
+          ? "Holdings, FIFO acquisition basis and realised results may change or become incomplete. Existing sells do not prevent correction."
+          : "Recorded cash balance and income/outflow summaries will be recomputed."}
       </p>
       <form onSubmit={submit} noValidate>
         {!deleting && (
           <fieldset disabled={busy}>
-            {trade && (
+            {(trade || income || charge) && (
               <label>
-                Instrument
+                {charge ? "Instrument (optional)" : "Instrument"}
                 <select
-                  aria-label="Instrument"
+                  aria-label={charge ? "Instrument (optional)" : "Instrument"}
                   value={instrument}
                   onChange={(e) => setInstrument(e.target.value)}
                   aria-invalid={!!errors.instrument_id}
                 >
-                  <option value="">Select Instrument</option>
+                  <option value="">
+                    {charge ? "None — account-level" : "Select Instrument"}
+                  </option>
                   {instruments.map((i) => (
                     <option key={i.id} value={i.id}>
                       {i.name} · #{i.id}
@@ -201,7 +246,7 @@ export function CorrectionDialog({
                 </>
               )}
               <Field
-                label="Cash amount"
+                label={income ? "Gross amount" : "Cash amount"}
                 name="cash_amount"
                 decimal
                 value={values.cash_amount}
@@ -209,6 +254,18 @@ export function CorrectionDialog({
                 error={errors.cash_amount}
               />
             </div>
+            {income && <IncomeHelp type={transaction.type} />}
+            {charge && (
+              <RelationPicker
+                history={history}
+                instruments={instruments}
+                value={related}
+                onChange={setRelated}
+                error={errors.related_transaction_id}
+                type={transaction.type}
+                excludeId={transaction.id}
+              />
+            )}
             {trade && (
               <p className="muted">
                 Quantity, price and cash amount are independent facts. No

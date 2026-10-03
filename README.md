@@ -18,11 +18,11 @@ The revised MVP v0.1 is a usable personal manual investment journal. Manual Port
 
 ## Current Stage
 
-- The API persists Portfolio, InvestmentAccount and Instrument records, accepts manual DEPOSIT / BUY / SELL, and reads Account transaction history.
-- Public Account and Portfolio reads expose exact position quantities and gross trade-cash realised P&L.
+- The API persists Portfolio, InvestmentAccount and Instrument records, accepts all eight manual canonical transaction types, and reads Account transaction history.
+- Public Account and Portfolio reads expose exact position quantities, gross trade-cash realised P&L, and as-of-date Money summaries with recorded cash and separate income/outflow totals by currency.
 - FIFO lots and cost-basis reconstruction are internal, recomputable derived capabilities, not public lot/cost-basis APIs.
 - Financial facts preserve independent quantity / price / cash inputs. Realised P&L uses exact rational money, remains partitioned by currency, and explicitly reports unresolved missing-basis or currency-mismatch components. It is not net, tax-adjusted or FX-converted profit.
-- The browser supports Portfolio/Account browsing and creation, Instrument selection/creation, manual DEPOSIT / BUY / SELL, Account History with edit/hard-delete for those types, and Account/Portfolio Holdings and gross realised results. Valuation, unrealised P&L, performance, benchmark and imports remain future capabilities.
+- The browser supports Portfolio/Account browsing and creation, Instrument selection/creation, manual DEPOSIT / WITHDRAWAL / BUY / SELL / DIVIDEND / COUPON / FEE / TAX, Account History with edit/hard-delete for all eight types, and Account/Portfolio Holdings, Money and gross realised results. Fee/Tax can be standalone or linked for context. Valuation, unrealised P&L, performance, benchmark and imports remain future capabilities.
 
 ## Documentation
 
@@ -56,15 +56,17 @@ pnpm build
 
 Start the API on `127.0.0.1:8000` and open the web server (normally `http://localhost:3000`). Web requests use a same-origin `/api` rewrite to the API; set the server-side `API_URL` before starting/building web if the API endpoint differs. This is a local single-user workflow, not an authentication or public-deployment boundary.
 
-Workspace context is Portfolio → Account, with a Portfolio summary option. Account views are Holdings / History / Realised result; Portfolio summary has no transaction entry or History. Creation and recording use dialogs. BUY/SELL quantity, price and cash remain independent decimal-string inputs; mismatch and oversell do not block valid entry.
+Workspace context is Portfolio → Account, with a Portfolio summary option. Account views are Holdings / History / Money / Realised result; Portfolio summary has Holdings / Money / Realised result, without transaction entry or History. Creation and recording use dialogs. BUY/SELL quantity, price and cash remain independent decimal-string inputs; mismatch and oversell do not block valid entry. Income entry requires gross income; known withholding is a separate Tax, and net-only source data is deferred.
 
-History Edit replaces approved factual fields in place, preserving ID, type, Account, creation metadata, note and canonical relations. Delete requires confirmation and permanently removes the canonical event; there is no undo or audit history. Both refresh History, Holdings and Realised result. Derived matches never block a correction, but an inbound canonical related transaction blocks deletion (409). Backdated corrections can change FIFO and past realised results; concurrent stale-tab writes are last-write-wins. See F006 and Decision 017 for the complete contract.
+History Edit replaces approved factual fields in place, preserving ID, type, Account, creation metadata and note. Fee/Tax optional Instrument and relation are editable with explicit clearing. Delete requires confirmation and permanently removes the canonical event; there is no undo or audit history. Both refresh History, Holdings, Money and Realised result. Derived matches never block a correction, but an inbound canonical related transaction blocks deletion (409), until its Fee/Tax link is explicitly cleared/changed or its child deleted. Backdated corrections can change FIFO and past realised results; concurrent stale-tab writes are last-write-wins. See F006–F008 and Decisions 017–018 for the complete contract.
+
+Money uses an explicit as-of effective date, initially browser-local today. Changing that date refetches Money only, and changing Account/Portfolio resets it. Recorded cash can be negative and is not available/settled broker cash. All amounts remain exact scale-eight decimal strings, including totals beyond canonical input width; no approximate display, FX total, net income or net P&L is introduced. Fee/Tax do not affect gross trade-cash realised P&L.
 
 Exact-money presentation uses native BigInt rationals, currency suffixes and at most eight decimal places. Non-exact display rounding is half away from zero and marked `≈`; original rational values remain unchanged and display values never feed writes/calculations. No currency totals or FX conversion are performed.
 
 ### Browser E2E
 
-The minimal Playwright suite covers the full journal journey, incomplete oversell results, and correction/deletion of a consumed BUY with recomputed Holdings/Realised results on desktop and narrow viewports. It writes uniquely named synthetic records through the browser, so **do not point its API at a personal/development-data database**.
+The Playwright suite covers the full journal journey, incomplete oversell results, correction/deletion of a consumed BUY, and gross income/linked Tax/Money/correction/FK-conflict flows on desktop and narrow viewports. It writes uniquely named synthetic records through the browser, so **do not point its API at a personal/development-data database**.
 
 First run the full backend tests below to initialize/recreate the disposable `investment_tracker_test` database. After those tests finish, start a separate API process with `DATABASE_URL` set to:
 

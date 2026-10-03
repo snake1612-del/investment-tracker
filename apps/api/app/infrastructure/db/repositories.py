@@ -172,7 +172,12 @@ class SqlAlchemyTransactionRepository:
             model.quantity = facts.quantity
             model.price = facts.price
             model.settlement_date = facts.settlement_date
-        # Identity, type, Account, creation metadata, note and canonical relations are untouched.
+        elif facts.type in {TransactionType.DIVIDEND, TransactionType.COUPON}:
+            model.instrument_id = facts.instrument_id
+        elif facts.type in {TransactionType.FEE, TransactionType.TAX}:
+            model.instrument_id = facts.instrument_id
+            model.related_transaction_id = facts.related_transaction_id
+        # Identity, type, Account, creation metadata and note are untouched.
         model.updated_at = datetime.now(UTC)
         self.session.flush()
         return transaction_record(model)

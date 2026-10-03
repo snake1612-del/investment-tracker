@@ -4,15 +4,19 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Response, status
 
 from app.api.schemas import (
+    ChargeCorrectionRequest,
     DepositCorrectionRequest,
     DepositCreate,
+    IncomeCorrectionRequest,
     PositionRead,
     TradeCorrectionRequest,
     TradeCreate,
     TransactionRead,
 )
 from app.application.corrections import (
+    ChargeCorrection,
     DepositCorrection,
+    IncomeCorrection,
     TradeCorrection,
     delete_manual_transaction,
     update_manual_transaction,
@@ -35,12 +39,16 @@ router = APIRouter()
 def put_transaction(
     account_id: int,
     transaction_id: int,
-    body: TradeCorrectionRequest | DepositCorrectionRequest,
+    body: TradeCorrectionRequest
+    | IncomeCorrectionRequest
+    | ChargeCorrectionRequest
+    | DepositCorrectionRequest,
     factory: Annotated[UowFactory, Depends(get_uow_factory)],
 ) -> TransactionRead:
     try:
-        correction = (
-            TradeCorrection(
+        correction: TradeCorrection | IncomeCorrection | ChargeCorrection | DepositCorrection
+        if isinstance(body, TradeCorrectionRequest):
+            correction = TradeCorrection(
                 body.instrument_id,
                 body.effective_date,
                 body.currency_code,
@@ -49,11 +57,25 @@ def put_transaction(
                 Decimal(body.cash_amount),
                 body.settlement_date,
             )
-            if isinstance(body, TradeCorrectionRequest)
-            else DepositCorrection(
+        elif isinstance(body, IncomeCorrectionRequest):
+            correction = IncomeCorrection(
+                body.instrument_id,
+                body.effective_date,
+                body.currency_code,
+                Decimal(body.cash_amount),
+            )
+        elif isinstance(body, ChargeCorrectionRequest):
+            correction = ChargeCorrection(
+                body.instrument_id,
+                body.related_transaction_id,
+                body.effective_date,
+                body.currency_code,
+                Decimal(body.cash_amount),
+            )
+        else:
+            correction = DepositCorrection(
                 body.effective_date, body.currency_code, Decimal(body.cash_amount)
             )
-        )
     except InvalidOperation as exc:
         raise InvalidInput("Financial values must be decimal strings") from exc
     return TransactionRead.from_record(
