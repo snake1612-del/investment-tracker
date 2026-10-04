@@ -3500,3 +3500,27 @@ The existing canonical model already represents all eight monetary events and op
 **Consequences**
 
 No schema migration is required or introduced. No financial snapshots/caches, new tables/flags, generic transaction framework, relation-candidate endpoint, audit/revision model, dependencies, authentication redesign, valuation/performance, imports or integrations are added. Existing F001–F006 and F003–F005 golden regressions remain substantively unchanged. Tests cover strong event validation, atomic relation/correction behavior, exact scale-eight reconstruction and wire output, Account-first Portfolio reads, unchanged F005 gross results, browser lifecycle/date behavior and complete desktop/narrow journeys.
+
+## Decision 019 — Local and cloud runtime
+
+**Decision**
+
+Local development uses Docker Compose with Web (Next.js, Node 24/pnpm), API (FastAPI, Python 3.14/uv) and PostgreSQL. Preserve the existing persistent PostgreSQL volume and loopback host mapping `127.0.0.1:55432:5432`. Web and API expose local ports 3000 and 8000 and support source hot reload. Inside Compose, API connects to `db:5432`; Web uses server-side `API_URL=http://api:8000`. Keep browser → same-origin `/api/*` → Next.js rewrite → FastAPI.
+
+Local API startup waits for healthy PostgreSQL and successfully applies `alembic upgrade head` before starting Uvicorn. Migration failure prevents startup. Normal browser development uses `investment_tracker`; backend tests and E2E use only the separate disposable `investment_tracker_test`, preserving existing test safeguards. Normal `docker compose down` retains data; volume removal is an explicit destructive action.
+
+The approved cloud topology is one Vercel Project with two Services: Web rooted at `apps/web` and API at `apps/api`, preserving Node 24 and Python 3.14. Web → API uses a Vercel Service Binding exposed as server-side `API_URL`, not manually constructed Preview API URLs. Preview connects only to an isolated staging Supabase PostgreSQL project; Production connects only to a separate production Supabase PostgreSQL project. Preview must never receive production database credentials. Supabase is PostgreSQL only, not browser persistence, Data API, Auth or Edge Functions.
+
+`DATABASE_URL` is the application runtime connection. Local runtime retains ordinary SQLAlchemy pooling. Cloud runtime uses Supabase transaction pooling with SQLAlchemy NullPool, prepared statements disabled where required and TLS preserved. `MIGRATION_DATABASE_URL` is the operator/Alembic direct connection, with local/CI fallback to the existing runtime URL when absent; `TEST_DATABASE_URL` remains disposable local/CI configuration. `DATABASE_POOL_MODE` distinguishes local and serverless policies when that support is implemented and verified. Cloud migrations are explicit operator operations, never API startup or request work. Alembic remains schema authority; production migration requires a backup first.
+
+Use approved Vercel deployment protection for all deployments where available; real financial data must not be publicly readable/writable. No custom application authentication is introduced here. Before real-data readiness, establish a project-controlled direct-connection logical backup procedure and verify a synthetic restore into disposable non-production PostgreSQL. Never restore destructively into Production.
+
+**Reason**
+
+A one-command local runtime makes the existing journal reproducible while the approved cloud topology retains the same browser/API boundary. Separate staging/production databases, explicit migrations and operational safety gates prevent Preview work from affecting real financial data.
+
+**Consequences**
+
+No financial methodology, API contract, schema or product UX changes are required. Preserve Decisions 001–018 and F001–F008 substantively. Local Docker may be delivered independently; approved cloud architecture is not a claim of cloud implementation. Factual implementation/readiness lives in OPERATIONS and README.
+
+Stop before substituting another topology if Vercel Services/account behavior blocks the approved design. Stop before purchase/upgrade if two isolated Supabase projects cannot be provisioned under the approved account limits. Never alter unrelated resources to release capacity. If deployment protection requires an unapproved paid change, production real-data readiness is blocked. No cloud readiness may be claimed without environment isolation, access protection, direct-endpoint connectivity and the backup/restore gate being verified.

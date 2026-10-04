@@ -1,0 +1,16 @@
+node_modules
+.next
+.env
+.env.*
+.npmrc
+.pypirc
+*.pem
+*.key
+credentials.json
+secrets.json
+*.tsbuildinfo
+test-results
+playwright-report
+coverage
+.pnpm-store
+*.log
