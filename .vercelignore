@@ -1,0 +1,25 @@
+# Operator secrets, backups and local verification artifacts never leave the host.
+**/.env
+**/.env.*
+**/tmp/**
+**/temp/**
+**/*.dump
+**/*.pem
+**/*.key
+**/.pgpass
+**/credentials.json
+**/secrets.json
+
+# Local dependencies, build output and tool caches are not deployment sources.
+**/.venv/**
+**/.uv-cache/**
+**/node_modules/**
+**/.next/**
+**/__pycache__/**
+**/.pytest_cache/**
+**/.ruff_cache/**
+**/.cache/**
+**/test-results/**
+**/playwright-report/**
+**/*.tsbuildinfo
+**/*.log
