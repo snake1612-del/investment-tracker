@@ -87,6 +87,12 @@ First run the full backend tests below to initialize/recreate the disposable `in
 postgresql+psycopg://investment_tracker:local_development_only@127.0.0.1:55432/investment_tracker_test
 ```
 
+Start that isolated API from `apps/api` on port 8001:
+
+```bash
+uv run uvicorn app.main:app --host 127.0.0.1 --port 8001
+```
+
 Then, from `apps/web`:
 
 ```bash
@@ -94,7 +100,7 @@ pnpm exec playwright install chromium
 pnpm test:e2e
 ```
 
-Do not run backend tests concurrently with E2E: backend tests recreate that database. Playwright starts web when needed and expects the API already running on port 8000. `WEB_PORT` overrides the default web port 3000 if occupied; `API_URL` overrides the rewrite target. Stop the test API/web processes afterwards; the next backend test run recreates disposable records. Existing GitHub CI checks are unchanged; E2E is currently a separate local verification command.
+Do not run backend tests concurrently with E2E: backend tests recreate that database. Plain `pnpm test:e2e` starts its own Web on port 3001 with `API_URL=http://127.0.0.1:8001`; it never reuses an existing Web server. Without the isolated API, tests fail rather than fall back to normal Docker ports 3000/8000. `WEB_PORT` and `API_URL` may explicitly override the isolated endpoints; never point them at normal development data. Stop the test API/web processes afterwards; the next backend test run recreates disposable records. Existing GitHub CI checks are unchanged; E2E is currently a separate local verification command.
 
 ### API
 

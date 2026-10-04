@@ -1,7 +1,8 @@
 import { defineConfig } from "@playwright/test";
 
-const port = process.env.WEB_PORT ?? "3000";
+const port = process.env.WEB_PORT ?? "3001";
 const baseURL = `http://127.0.0.1:${port}`;
+const apiURL = process.env.API_URL ?? "http://127.0.0.1:8001";
 
 export default defineConfig({
   testDir: "./e2e",
@@ -15,6 +16,7 @@ export default defineConfig({
   webServer: {
     command: `pnpm dev --hostname 127.0.0.1 --port ${port}`,
     url: baseURL,
-    reuseExistingServer: !process.env.CI,
+    env: { API_URL: apiURL },
+    reuseExistingServer: false,
   },
 });

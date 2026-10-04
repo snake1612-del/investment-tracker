@@ -84,7 +84,7 @@ postgresql+psycopg://investment_tracker:local_development_only@127.0.0.1:55432/i
 uv run uvicorn app.main:app --host 127.0.0.1 --port 8001
 ```
 
-From `apps/web`, with Node 24/pnpm 11.25.0 on the host, set `WEB_PORT=3001` and server-side `API_URL=http://127.0.0.1:8001` in that shell, then:
+From `apps/web`, with Node 24/pnpm 11.25.0 on the host and no exported `WEB_PORT`/`API_URL` overrides, run:
 
 ```bash
 pnpm install --frozen-lockfile
@@ -92,7 +92,7 @@ pnpm exec playwright install chromium
 pnpm test:e2e
 ```
 
-Playwright starts its own Web server at 3001, never the normal development Web at 3000. Do not run pytest concurrently with E2E, as it recreates the test database. Stop the test API/Web processes afterwards. The next pytest run clears synthetic test records. See README for the remaining host quality checks.
+Playwright defaults to its own Web server at 3001 and explicitly passes `API_URL=http://127.0.0.1:8001` to it. Existing Web servers are never reused. If the isolated API is absent, tests fail without falling back to normal Docker Web/API at 3000/8000. Explicit endpoint overrides must retain test database isolation. Do not run pytest concurrently with E2E, as it recreates the test database. Stop the test API/Web processes afterwards. The next pytest run clears synthetic test records. See README for the remaining host quality checks.
 
 ## Cloud target — not implemented
 
