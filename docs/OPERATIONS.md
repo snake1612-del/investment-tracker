@@ -25,7 +25,7 @@ docker compose logs -f web api db
 | API health           | http://localhost:8000/health |
 | PostgreSQL from host | 127.0.0.1:55432              |
 
-The browser uses same-origin `/api/*`; Next.js rewrites to server-side `API_URL=http://api:8000`. API uses the Compose `db:5432` connection to `investment_tracker`. The unrelated host PostgreSQL port 5432 is not used. Existing SQLAlchemy runtime pooling remains unchanged.
+The browser uses same-origin `/api/*`; a Next.js route handler proxies to server-side `API_URL=http://api:8000` at request time. API uses the Compose `db:5432` connection to `investment_tracker`. The unrelated host PostgreSQL port 5432 is not used. Existing SQLAlchemy runtime pooling remains unchanged.
 
 Startup order is healthy DB → `alembic upgrade head` → Uvicorn → healthy API → Next.js. Migration failure prevents API startup. Inspect `docker compose logs api` before retrying; never bypass a failed migration to serve requests.
 
@@ -94,10 +94,72 @@ pnpm test:e2e
 
 Playwright defaults to its own Web server at 3001 and explicitly passes `API_URL=http://127.0.0.1:8001` to it. Existing Web servers are never reused. If the isolated API is absent, tests fail without falling back to normal Docker Web/API at 3000/8000. Explicit endpoint overrides must retain test database isolation. Do not run pytest concurrently with E2E, as it recreates the test database. Stop the test API/Web processes afterwards. The next pytest run clears synthetic test records. See README for the remaining host quality checks.
 
-## Cloud target — not implemented
+## Cloud Runtime v0.1 — synthetic acceptance passed
 
-Pending provisioning — blocked by Supabase project quota.
+One Vercel project deploys Web (`apps/web`, Next.js/Node 24) and API (`apps/api`, FastAPI/Python 3.14) Services. Public routing exposes Web only. Browser `/api/*` requests use a server-side route handler and the runtime-only `API_URL` service binding to that deployment's private API. Missing cloud binding fails closed; there is no cloud localhost fallback. Functions use the project Frankfurt `fra1` region; build-machine location is independent.
 
-Approved target: one Vercel Project, Web (`apps/web`) and API (`apps/api`) Services, with Web → API Service Binding exposed as server-side `API_URL`. Preview uses staging Supabase PostgreSQL only; Production uses a separate production Supabase project only. Production credentials must never be available in Preview.
+### Environment mapping
 
-No cloud resources, cloud environment variables, cloud migrations, credentials or deployments are supplied by this local pass. Runtime transaction pooling, direct operator migrations, deployment protection and a verified logical backup/restore drill remain future cloud-pass requirements. Production real-data use remains blocked until those safety gates are satisfied.
+| Vercel target | Runtime database | Policy |
+| --- | --- | --- |
+| Preview | Neon Investment Tracker Staging, `calm-credit-61662826`, shared main | Synthetic/non-production only |
+| Production | Neon Investment Tracker Production, `young-unit-23492458`, main | Separate project; no real data until readiness gates pass |
+| Development | No cloud DATABASE_URL | Use local Docker |
+
+Both projects use PostgreSQL 18 in `aws-eu-central-1`. `DATABASE_URL` is stored as a separate Vercel Secret per target, never public/client-side. No Production credentials in Preview and no Staging credentials in Production. Shared Staging is not isolated per Preview: concurrent Preview writes can affect each other. Never use Production as a Preview parent. The rejected managed Neon integration was disconnected and uninstalled; mapping is manual, with no dynamic branch creation or integration-owned env variables.
+
+Cloud SQLAlchemy uses `NullPool`; Neon pooled runtime URLs retain TLS/channel-binding parameters and normal Psycopg prepared-statement behavior. `VERCEL` selects serverless policy automatically; `DATABASE_POOL_MODE=serverless` is also available for operator checks. Cloud runtime requires a Neon pooled URL with TLS. Local Docker retains ordinary pooling.
+
+### Explicit operator migrations
+
+Set `MIGRATION_DATABASE_URL` only in the operator process to the selected project's direct/unpooled Neon URL. Do not print it, commit it, put it into browser variables or normal Vercel runtime, or pass it in shell command arguments. Set `DATABASE_POOL_MODE=serverless`, then from `apps/api` run:
+
+```bash
+uv run alembic upgrade head
+uv run alembic current
+uv run alembic check
+```
+
+Cloud migration fails if the operator URL is absent, pooled, non-Neon or lacks TLS. Local/CI retains DATABASE_URL fallback. No cloud startup/request performs migrations. Verify project identity before any operation; migrate Staging first and Production only after Preview acceptance, with a direct-connection backup before Production migration. Never run the ordinary pytest database-reset fixture against cloud databases.
+
+### Deployment order and protection
+
+Keep Vercel Authentication on All Deployments; do not weaken it for verification. Use authenticated browser access or `vercel curl` for checks, and separately confirm unauthenticated access is denied/redirected.
+
+Vercel's first deployment is Production. The approved one-time exception uses deployment-only `CLOUD_BOOTSTRAP_ONLY=1`: `app.vercel:app` exposes health only, imports no persistence application and does no SQL. Production DATABASE_URL may be present but must not be used. This infrastructure bootstrap is not Production application acceptance. Never persist the bootstrap flag in project env; subsequent Preview and full Production deploys must omit it.
+
+After bootstrap: deploy Preview, explicitly migrate Staging, verify browser Web/API/DB synthetic CRUD and persistence. Only after Preview passes: back up/migrate Production, deploy Production with Production-only credentials, smoke-test synthetic create/read/delete and remove all smoke records. Do not promote a Preview artifact into Production: rebuild with the Production environment.
+
+### Readiness and cleanup gates
+
+Verified on 2026-10-04, before milestone review:
+
+- Infrastructure bootstrap: `dpl_3pCC2vmZENiJNbFXXgAoF5Yu7hh7`, health-only Production deployment, no SQL or migrations. This is infrastructure bootstrap, not application Production acceptance.
+- Preview: [deployment](https://investment-tracker-4zxazfukh-snake1612-del.vercel.app), `dpl_7uyxz1eUCgqZfUuUkKSPjwk4E4cn`, READY. Browser synthetic create/read/update, refresh/persistence and API delete passed against Staging. Exact corrected `125.00000001` was independently confirmed in Staging and a restored backup; deletion persisted after refresh.
+- Production: [deployment](https://investment-tracker-gfvhe591v-snake1612-del.vercel.app), `dpl_4oNHQdNjoAzCsJAr6QPGKf26BRm4`, READY. Browser synthetic create/read and refresh/persistence, then API delete passed against Production. All synthetic Production transactions, Accounts and Portfolios were removed; all four canonical tables are empty.
+- Both explicit direct migrations reached `0001_initial_persistence (head)`; Alembic check passed with no new operations. No new migration was created.
+- Both authenticated health requests returned 200; unauthenticated health requests returned 302 to Vercel Authentication. All Deployments protection and `fra1` Function placement were retained. Environment mapping was verified independently using distinct project data.
+- Backend 552 tests, Web 90 tests, Playwright desktop 4 / narrow 4, Ruff, Pyright, Web lint/typecheck/format/build and local Alembic checks passed. Local Compose Web/API/DB startup and proxy health passed using a temporary DB host-port override to 55433 because another project's container owns 55432. Committed local ports are unchanged; verification containers were stopped without volume removal. E2E used a fresh Web on 3002 because 3001 was already occupied; isolated API remained 8001 with only the test database.
+
+No real investment data has been entered. The logical backup/restore gate below passed for synthetic data; review is still required before milestone closure. Never restore destructively into Production.
+
+### Logical backup and restore
+
+Use PostgreSQL 18 client tools and the selected project's **direct**, TLS connection. Obtain operator credentials securely into process-local `PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, `PGDATABASE` and `PGSSLMODE=require`; do not paste secrets into command arguments or logs. Preserve any stricter TLS/channel-binding settings. Verify the project identity before exporting. Keep backups outside Git and restrict access; actual financial backups are sensitive.
+
+```bash
+pg_dump --format=custom --file=backup.dump
+```
+
+Check command success and retain an independent copy before migration. Restore only into a newly created, explicitly named disposable non-production database. Use local destination credentials (not the cloud source credentials):
+
+```bash
+createdb investment_tracker_restore_drill
+pg_restore --no-owner --no-acl --exit-on-error --dbname=investment_tracker_restore_drill backup.dump
+```
+
+Compare Alembic revision, canonical row counts and exact monetary values with the source snapshot. Remove the disposable restore database after verification, never the source. Clear credential environment variables afterwards. A backup that has not been restored and checked is not a verified recovery path.
+
+This milestone exported Staging through its direct connection, restored it into separate local PostgreSQL 18 and confirmed exact `125.00000001` from the synthetic journal. A direct logical Production backup was also captured before its first migration. Ignored verification artifacts are retained locally under `tmp/`; they contain synthetic data only and are not committed. This proves the logical procedure, not a scheduled backup service, retention policy or recovery SLA; maintain independent backups before real-data use and each Production migration.
+
+The original Supabase cloud target is superseded by Neon. After both Neon environments passed end-to-end, the unused empty Supabase Investment Tracker Staging (`udikkyzgisvrggjmjpjv`) was permanently deleted with explicit confirmation. Before deletion it had no public tables, Auth users, Storage objects, Edge Functions or branches. Fitness RPG Pilot was restored after Free capacity became available and reached ACTIVE_HEALTHY. AI Wardrobe remained ACTIVE_HEALTHY and was not altered.

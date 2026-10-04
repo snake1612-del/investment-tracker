@@ -66,6 +66,7 @@ Thumbs.db
 Desktop.ini
 
 # Temporary files
+.vercel/
 tmp/
 temp/
 .cache/
