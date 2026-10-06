@@ -44,7 +44,7 @@ docker compose up --build
 
 Open `http://localhost:3000`; the API is at `http://localhost:8000` and PostgreSQL at `127.0.0.1:55432`. API startup applies Alembic migrations before serving; both source trees hot-reload. Stop with `docker compose down` to preserve database data. See [OPERATIONS](docs/OPERATIONS.md) for logs, rebuilds, persistence and isolated testing.
 
-Cloud runtime remains pending provisioning, blocked by Supabase project quota. The following host-run workflows remain available; tests/E2E must use the disposable test database, never the normal Docker API/database.
+Cloud Runtime v0.1 has passed protected Preview and Production synthetic acceptance: Vercel Web/API Services with Neon Staging shared main for Preview and a separate Neon Production project. See [OPERATIONS](docs/OPERATIONS.md) for deployment evidence, backup/restore and operator procedures. No real investment data has been entered. The following host-run workflows remain available; tests/E2E must use the disposable test database, never the normal Docker API/database.
 
 The project requires Node.js 24, pnpm, Python 3.14, and uv. New financial semantics and durable architectural changes require approved decisions; ordinary implementation details follow the existing rules in [AGENTS.md](AGENTS.md).
 
@@ -67,7 +67,7 @@ pnpm format:check
 pnpm build
 ```
 
-Start the API on `127.0.0.1:8000` and open the web server (normally `http://localhost:3000`). Web requests use a same-origin `/api` rewrite to the API; set the server-side `API_URL` before starting/building web if the API endpoint differs. This is a local single-user workflow, not an authentication or public-deployment boundary.
+Start the API on `127.0.0.1:8000` and open the web server (normally `http://localhost:3000`). Web requests use a same-origin `/api` server-side proxy to the API; set the server-side `API_URL` before starting web if the API endpoint differs. This is a local single-user workflow, not an authentication or public-deployment boundary.
 
 Workspace context is Portfolio → Account, with a Portfolio summary option. Account views are Holdings / History / Money / Realised result; Portfolio summary has Holdings / Money / Realised result, without transaction entry or History. Creation and recording use dialogs. BUY/SELL quantity, price and cash remain independent decimal-string inputs; mismatch and oversell do not block valid entry. Income entry requires gross income; known withholding is a separate Tax, and net-only source data is deferred.
 
