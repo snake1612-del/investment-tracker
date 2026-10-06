@@ -3948,3 +3948,449 @@ Only one additive database migration is required.
 No existing F001–F008 financial model needs redesign.
 
 There is no financial or architecture blocker for implementation.
+
+---
+
+## Decision 021 — Performance & Benchmark v1
+
+**Decision**
+
+Performance & Benchmark v1 exposes Portfolio-level performance based on Decision F010 and an optional single-Instrument benchmark comparison based on Decision F011.
+
+The capability is derived on request from existing canonical and market-price facts.
+
+## Persistence
+
+Decision 021 introduces no new persistence.
+
+No database migration is required.
+
+Do NOT create:
+
+- performance tables;
+- daily Portfolio-value tables;
+- daily-return tables;
+- benchmark tables;
+- benchmark-preference columns;
+- performance cache tables;
+- snapshots;
+- materialized views;
+- persisted benchmark simulation state.
+
+Performance and benchmark outputs remain derived state.
+
+## Request-scoped benchmark selection
+
+Benchmark selection is request-scoped through:
+
+```text
+benchmark_instrument_id
+```
+
+The selection is not persisted as Portfolio configuration or user preference.
+
+When supplied, `benchmark_instrument_id` must identify an existing canonical Instrument.
+
+The benchmark Instrument is global under the existing single-user Instrument model.
+
+Decision 021 introduces no requirement that the benchmark Instrument:
+
+- belong to the Portfolio;
+- belong to any InvestmentAccount;
+- be pre-associated with the Portfolio;
+- be absent from Portfolio holdings.
+
+The selected benchmark Instrument MAY also be an Instrument actually held by the Portfolio.
+
+No Account/Portfolio ownership or benchmark-membership model is introduced.
+
+## Market-price source
+
+Benchmark and Portfolio valuation use only the existing:
+
+```text
+MarketPriceObservation
+```
+
+persistence/model.
+
+Decision 021 introduces no:
+
+- benchmark-price table;
+- index-price table;
+- alternate benchmark market-data store.
+
+Price selection must reuse the existing approved F009 latest-applicable semantics and the financial rules of F010/F011.
+
+## Public API scope
+
+Performance & Benchmark v1 exposes Portfolio-level public performance only.
+
+Public endpoint:
+
+```text
+GET /portfolios/{portfolio_id}/performance
+    ?start_date=YYYY-MM-DD
+    &end_date=YYYY-MM-DD
+    [&benchmark_instrument_id=...]
+```
+
+The requested period is the F010 inclusive period:
+
+```text
+[S, E]
+```
+
+If:
+
+```text
+benchmark_instrument_id
+```
+
+is absent, the request calculates Portfolio performance only.
+
+If it is present, the request also attempts the F011 benchmark simulation/comparison.
+
+Decision 021 does NOT expose:
+
+- public Account performance endpoint;
+- public daily Portfolio-value endpoint;
+- public daily return series;
+- separate public benchmark-history endpoint.
+
+Account-level reconstruction exists only as an internal implementation boundary for Portfolio performance.
+
+## Account-first internal reconstruction
+
+Portfolio performance remains internally Account-first.
+
+For one Portfolio performance request, implementation reconstructs the required factual/account state per InvestmentAccount and then combines the account results into Portfolio-level Performance Value according to the approved financial methodology.
+
+This does not create a public Account-performance product surface.
+
+## Factual-history loading
+
+For one performance request:
+
+- load factual transaction/history data once per InvestmentAccount;
+- do not perform a new factual-history database query for every requested date.
+
+The chronological financial calculation operates on already-loaded factual histories.
+
+## Market-price loading
+
+For one performance request, required MarketPriceObservation data is loaded in batch.
+
+The batch must cover the prices required for:
+
+- Portfolio-held Instruments needed by F009/F010;
+- the optional benchmark Instrument when requested.
+
+Do not perform a database market-price query separately for every date in `[S-1,E]`.
+
+Decision 021 requires one batch market-price load per request rather than date-by-date DB access.
+
+## In-memory chronological sweep
+
+After factual history and required market-price observations are loaded, the financial calculation runs as a pure in-memory chronological sweep from:
+
+```text
+S-1
+```
+
+through:
+
+```text
+E
+```
+
+The sweep reconstructs the required state using approved financial primitives.
+
+No database query-per-date calculation model is introduced.
+
+No persisted daily derived-state table is required to perform the sweep.
+
+## Reuse of approved financial primitives
+
+Performance implementation must reuse or extract existing approved financial primitives rather than duplicating their rules inside a new performance subsystem.
+
+In particular:
+
+- reuse F008 canonical cash semantics;
+- reuse F003 quantity/position reconstruction semantics;
+- reuse or extract F009 latest-applicable market-price selection;
+- reuse or extract F009 exact signed-market-value marking primitives.
+
+Performance-specific code must not create alternative versions of:
+
+- cash reconstruction;
+- position reconstruction;
+- price selection;
+- exact market-value calculation.
+
+F010 defines how those already-approved values are combined into Performance Value and TWR.
+
+F011 defines how the benchmark simulation uses the same approved price-selection semantics.
+
+## No F004/F005 dependency
+
+Performance & Benchmark v1 does NOT require F004 cost-basis/FIFO calculations.
+
+Performance & Benchmark v1 does NOT require F005 realised-P&L calculations.
+
+F010 Performance Value is based on:
+
+```text
+canonical F008 cash
++
+F009 signed security market value
+```
+
+not on:
+
+- cost basis;
+- realised P&L;
+- unrealised P&L.
+
+Implementation must not introduce an unnecessary F004/F005 dependency merely to calculate performance.
+
+## Exact monetary wire representation
+
+Exact monetary values continue to use the project's existing:
+
+```text
+ExactMoney
+```
+
+wire representation.
+
+Decision 021 does not redefine or replace ExactMoney.
+
+No monetary amount introduced by Performance & Benchmark v1 is serialized through binary floating-point representation.
+
+This applies to applicable values such as:
+
+- Portfolio values;
+- benchmark values;
+- ending-value difference;
+- other exact monetary diagnostic values where exposed.
+
+## Exact dimensionless-ratio wire representation
+
+Exact dimensionless ratios use:
+
+```json
+{
+  "numerator": "...",
+  "denominator": "..."
+}
+```
+
+Both fields are integer strings representing the exact rational value.
+
+This representation applies to exact dimensionless ratios such as:
+
+- Portfolio TWR;
+- Benchmark TWR;
+- active return;
+
+where those values are present.
+
+No JSON floating-point representation is canonical for these ratios.
+
+No silent rounding to display percentages is part of the financial API contract.
+
+## Portfolio performance unresolved vocabulary
+
+The public Performance & Benchmark v1 contract recognizes the following F010 unresolved reasons:
+
+```text
+MISSING_MARKET_PRICE
+MULTI_CURRENCY_PERFORMANCE_REQUIRES_FX
+NON_POSITIVE_CAPITAL_BASE
+ZERO_CAPITAL_BASE_WITH_POSITIVE_VALUE
+NEGATIVE_PERFORMANCE_VALUE
+NO_CAPITAL_AT_RISK
+```
+
+These reason codes must retain the financial conditions defined by F010.
+
+Architecture must not reinterpret them or add fallback financial calculations.
+
+## Benchmark unresolved vocabulary
+
+The public Performance & Benchmark v1 contract recognizes the following F011 benchmark/comparison unresolved reasons:
+
+```text
+UNRESOLVED_PORTFOLIO_PERFORMANCE
+MISSING_BENCHMARK_MARKET_PRICE
+BENCHMARK_CURRENCY_MISMATCH
+ZERO_BENCHMARK_OPENING_PRICE
+ZERO_BENCHMARK_FLOW_EXECUTION_PRICE
+BENCHMARK_WITHDRAWAL_EXCEEDS_VALUE
+ZERO_CAPITAL_BASE_WITH_POSITIVE_VALUE
+```
+
+These reason codes must retain the financial conditions defined by F011.
+
+Architecture must not reinterpret them or substitute alternate benchmark behavior.
+
+## Diagnostic context
+
+An unresolved result must expose its unresolved reason together with useful diagnostic context sufficient to identify the failing financial condition.
+
+Diagnostic context must come from the factual/reconstructed condition that caused the unresolved result.
+
+Where applicable, useful context may identify such information as:
+
+- affected date;
+- affected Instrument;
+- relevant currency;
+- relevant exact value or capital-base condition.
+
+Diagnostic context is informational.
+
+It must not alter:
+
+- financial methodology;
+- unresolved reason;
+- canonical facts;
+- exact values.
+
+Decision 021 does not authorize inferred fallback values merely to populate diagnostics.
+
+## Portfolio performance resolution
+
+Portfolio performance follows Decision F010 exactly.
+
+The required opening Performance Value `V_(S-1)` is included in the
+`NEGATIVE_PERFORMANCE_VALUE` rule. First-day flow cannot repair a negative
+opening value. In this case benchmark comparison reports
+`UNRESOLVED_PORTFOLIO_PERFORMANCE` without constructing opening benchmark units.
+
+Architecture does not define an alternative:
+
+- Performance Value;
+- external-flow classification;
+- same-day flow convention;
+- adjusted capital base;
+- daily growth factor;
+- TWR formula;
+- unresolved fallback.
+
+There is no partial requested-period public TWR when F010 says the requested period is unresolved.
+
+## Benchmark resolution
+
+When:
+
+```text
+benchmark_instrument_id
+```
+
+is supplied, benchmark simulation follows Decision F011 exactly.
+
+Architecture does not define an alternative:
+
+- opening benchmark capital;
+- opening unit rule;
+- benchmark flow-execution price;
+- benchmark unit evolution;
+- benchmark valuation;
+- benchmark TWR;
+- active-return formula;
+- ending-value-difference formula.
+
+If F011 says comparison is unresolved, the public response must not present the comparison as resolved.
+
+## Historical recomputation
+
+Performance and benchmark results are derived on request.
+
+Historical canonical changes therefore affect subsequently requested historical performance according to F010/F011.
+
+Decision 021 does not create a persisted result that overrides recomputation from current canonical/history facts.
+
+## No public daily series
+
+The implementation may internally calculate date-by-date state required by F010/F011.
+
+That internal chronological sweep does NOT create a public v1 daily performance API.
+
+Decision 021 exposes only requested-period Portfolio performance and optional benchmark comparison.
+
+Daily internal values are implementation state for the calculation, not a new persisted or public product surface.
+
+## Explicit non-scope
+
+Performance & Benchmark v1 does NOT introduce:
+
+- public Account performance endpoint;
+- public daily performance series;
+- public daily benchmark series;
+- persisted performance state;
+- persisted benchmark preference;
+- performance cache;
+- snapshots;
+- materialized views;
+- XIRR;
+- FX conversion;
+- FX-based multi-currency performance;
+- total-return benchmark;
+- benchmark dividend/coupon reinvestment;
+- benchmark corporate-action handling;
+- multi-Instrument benchmark;
+- weighted benchmark portfolio;
+- risk-adjusted performance;
+- volatility;
+- drawdown analytics;
+- tracking error;
+- alpha;
+- beta;
+- new market-data persistence.
+
+**Reason**
+
+Decisions F010 and F011 define performance and benchmark methodology entirely as derived calculations over already-existing canonical and market-price facts.
+
+No new accounting fact or benchmark preference must be persisted for v1.
+
+Account-first reconstruction preserves the project's existing canonical history boundaries while allowing Portfolio-level aggregation.
+
+Loading each Account's factual history once and required prices in one batch prevents an inefficient database-query-per-date design.
+
+A pure chronological in-memory sweep from `S-1` through `E` is sufficient to apply approved cash, quantity, valuation, performance and benchmark rules.
+
+Reusing F003, F008 and F009 primitives prevents Performance & Benchmark v1 from silently developing competing financial semantics.
+
+F004/F005 are not required because cost basis and realised P&L are not components of F010 Performance Value.
+
+ExactMoney and exact rational wire forms preserve exact financial representation through the public API.
+
+**Consequences**
+
+Investment Tracker gains one Portfolio-level performance capability with optional request-scoped comparison against one canonical Instrument.
+
+No schema migration or new persistent derived state is required.
+
+Benchmark selection is not stored.
+
+A benchmark Instrument only needs to exist; it does not require Portfolio/Account ownership and may also be held by the Portfolio.
+
+Existing MarketPriceObservation remains the sole price source for both Portfolio valuation and benchmark simulation.
+
+The implementation reconstructs internally by Account, loads factual history once per Account, loads required market prices in batch, and performs the date sweep in memory without database queries per date.
+
+Performance uses existing cash, quantity and valuation primitives rather than duplicated rules.
+
+Performance does not require FIFO/cost-basis or realised-P&L computation.
+
+Money remains ExactMoney on the wire.
+
+Dimensionless financial ratios remain exact numerator/denominator rationals on the wire.
+
+Unresolved results remain explicit and diagnostically useful rather than being silently approximated.
+
+No public Account performance, public daily series, persisted performance state, XIRR, FX, total-return benchmark or risk analytics is introduced.
+
+---

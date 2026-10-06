@@ -24,13 +24,41 @@ export function parseMoney(value: MoneyWire): ExactMoney {
       "Invalid exact-money payload. No financial value has been substituted.",
     );
   }
-  const numerator = BigInt(value.amount.numerator);
-  const denominator = BigInt(value.amount.denominator);
+  return { currency: value.currency_code, ...parseRatio(value.amount) };
+}
+
+export type RatioWire = { numerator: string; denominator: string };
+
+export function parseRatio(value: RatioWire): {
+  numerator: bigint;
+  denominator: bigint;
+} {
+  if (
+    !value ||
+    typeof value.numerator !== "string" ||
+    typeof value.denominator !== "string" ||
+    !/^(0|-?[1-9]\d*)$/.test(value.numerator) ||
+    !/^[1-9]\d*$/.test(value.denominator)
+  )
+    throw new Error(
+      "Invalid exact-ratio payload. No financial value has been substituted.",
+    );
+  const numerator = BigInt(value.numerator);
+  const denominator = BigInt(value.denominator);
   let a = numerator < zero ? -numerator : numerator;
   let b = denominator;
   while (b !== zero) [a, b] = [b, a % b];
   if (a !== one) throw new Error("Invalid non-canonical exact-money payload.");
-  return { currency: value.currency_code, numerator, denominator };
+  return { numerator, denominator };
+}
+
+export function formatPercent(value: RatioWire): string {
+  const ratio = parseRatio(value);
+  return formatMoney({
+    currency: "%",
+    numerator: ratio.numerator * BigInt(100),
+    denominator: ratio.denominator,
+  }).replace(" %", "%");
 }
 
 /** Half away from zero, presentation only. The original rational is never mutated. */

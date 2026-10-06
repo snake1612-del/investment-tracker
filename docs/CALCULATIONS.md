@@ -1358,3 +1358,959 @@ Same-currency resolved market values and unrealised results may aggregate by Acc
 Fees, taxes, dividends, coupons, cash and realised P&L remain separate financial dimensions.
 
 F009 does not define database schema, public API, frontend presentation, external quote providers, automatic price import, FX conversion, total Portfolio NAV, performance, TWR, XIRR or benchmark methodology.
+
+---
+
+# Decision F010 — Portfolio value and time-weighted performance
+
+**Decision**
+
+Decision F010 defines Portfolio Performance Value and time-weighted performance for an inclusive requested period:
+
+```text
+[S, E]
+```
+
+The calculation uses canonical accounting history and previously approved reconstruction/valuation semantics.
+
+## Performance Value
+
+For each date `d`, Portfolio Performance Value is:
+
+```text
+V_d =
+canonical F008 cash
++
+F009 signed security market value
+```
+
+Performance Value must NOT separately add:
+
+- cost basis;
+- realised P&L;
+- unrealised P&L;
+- Dividend totals;
+- Coupon totals.
+
+These values must not be added as additional Portfolio value components.
+
+BUY/SELL, income, fees, taxes, security holdings and cash already affect the canonical cash/security state through their approved semantics.
+
+## External owner flows
+
+For Performance & TWR v1, the only external owner flows are:
+
+- `DEPOSIT`;
+- `WITHDRAWAL`.
+
+For each date `d`, all external owner flows on that date are netted into one signed external flow:
+
+```text
+F_d
+```
+
+Direction:
+
+```text
+DEPOSIT    → positive F_d
+WITHDRAWAL → negative F_d
+```
+
+Same-day external flows are treated as occurring at the start of the day.
+
+The following are NOT external owner flows:
+
+- BUY;
+- SELL;
+- DIVIDEND;
+- COUPON;
+- FEE;
+- TAX.
+
+BUY and SELL are internal transformations between canonical cash and security position.
+
+DIVIDEND and COUPON increase performance through their actual canonical cash effect.
+
+FEE and TAX reduce performance through their actual canonical cash effect.
+
+Therefore v1 TWR is after actually recorded FEE/TAX cash effects.
+
+Decision F010 does NOT introduce a separate gross-before-fees or gross-before-tax TWR metric.
+
+## Requested period
+
+The requested period is inclusive:
+
+```text
+[S, E]
+```
+
+The opening Portfolio Performance Value is:
+
+```text
+V_(S-1)
+```
+
+Performance reconstruction therefore requires the state immediately before `S`.
+
+`V_(S-1)` is a required Performance Value. If `V_(S-1) < 0`, the requested
+performance is unresolved as `NEGATIVE_PERFORMANCE_VALUE`. First-day external
+flow does not make such a period resolved, even if the adjusted first-day
+capital base and closing value are positive.
+
+For every date `d` in `[S,E]`, define the adjusted capital base:
+
+```text
+A_d = V_(d-1) + F_d
+```
+
+## Daily growth factor — positive capital base
+
+If:
+
+```text
+A_d > 0
+```
+
+and:
+
+```text
+V_d >= 0
+```
+
+then:
+
+```text
+G_d = V_d / A_d
+```
+
+This includes the case:
+
+```text
+V_d = 0
+```
+
+which produces:
+
+```text
+G_d = 0
+```
+
+and therefore represents a `-100%` growth factor for that day.
+
+A zero market price is valid under the approved F009 valuation semantics.
+
+Therefore a valid zero market price may legitimately produce zero signed security market value, zero Portfolio Performance Value, and a `-100%` daily growth factor when the capital base is positive.
+
+## Daily growth factor — zero capital and zero value
+
+If:
+
+```text
+A_d = 0
+```
+
+and:
+
+```text
+V_d = 0
+```
+
+then:
+
+```text
+G_d = 1
+```
+
+This is a neutral day.
+
+In particular, a complete external withdrawal that leaves both:
+
+```text
+adjusted capital base = 0
+```
+
+and:
+
+```text
+closing Portfolio Performance Value = 0
+```
+
+produces:
+
+```text
+G_d = 1
+```
+
+This neutral day does NOT reset, erase, or replace TWR accumulated on earlier dates in the requested period.
+
+It contributes a multiplicative factor of `1` to the requested-period TWR chain.
+
+## Unresolved — non-positive capital base
+
+If:
+
+```text
+A_d < 0
+```
+
+the requested performance is unresolved as:
+
+```text
+NON_POSITIVE_CAPITAL_BASE
+```
+
+No growth factor is invented for that date.
+
+## Unresolved — zero capital base with positive value
+
+If:
+
+```text
+A_d = 0
+```
+
+and:
+
+```text
+V_d > 0
+```
+
+the requested performance is unresolved as:
+
+```text
+ZERO_CAPITAL_BASE_WITH_POSITIVE_VALUE
+```
+
+No infinite, synthetic, or fallback growth factor is reported.
+
+## Unresolved — negative Performance Value
+
+If:
+
+```text
+V_d < 0
+```
+
+the requested performance is unresolved as:
+
+```text
+NEGATIVE_PERFORMANCE_VALUE
+```
+
+Negative cash by itself does NOT make performance unresolved.
+
+Negative canonical cash is allowed when the total:
+
+```text
+Performance Value =
+cash + signed security market value
+```
+
+remains non-negative and the adjusted capital base remains valid under the rules above.
+
+The unresolved condition is based on total `V_d`, not merely on the cash component.
+
+## No capital at risk
+
+If the entire requested period contains no date for which:
+
+```text
+A_d > 0
+```
+
+the requested-period return MUST NOT be reported as `0%`.
+
+It is unresolved as:
+
+```text
+NO_CAPITAL_AT_RISK
+```
+
+The absence of capital at risk is not interpreted as zero investment performance.
+
+## Requested-period TWR
+
+When the requested period resolves under the rules above, TWR is:
+
+```text
+TWR =
+product(G_d for every d in [S,E])
+-
+1
+```
+
+The chain includes every date in the requested period according to the approved daily rules.
+
+There is no partial requested-period TWR fallback.
+
+If a required date cannot be resolved, the requested-period TWR is unresolved.
+
+The implementation must NOT:
+
+- skip the unresolved date;
+- shorten the requested period silently;
+- return TWR for only the resolvable suffix/prefix;
+- substitute a neutral growth factor unless the explicit `A_d = 0 && V_d = 0` rule applies.
+
+## Single-currency performance
+
+Performance v1 is single-currency only.
+
+All canonical cash and signed security market values required for one Performance Value must be resolvable in one common performance currency without introducing an unapproved FX conversion.
+
+If Portfolio Performance Value requires FX conversion that is not available under approved methodology, requested performance is unresolved as:
+
+```text
+MULTI_CURRENCY_PERFORMANCE_REQUIRES_FX
+```
+
+Decision F010 does not define:
+
+- FX conversion;
+- FX-rate selection;
+- FX settlement semantics;
+- FX P&L.
+
+## Missing market price
+
+Performance Value reuses F009 market-price and signed-market-value semantics.
+
+If a market price required to resolve signed security market value is missing, requested value/performance is unresolved as:
+
+```text
+MISSING_MARKET_PRICE
+```
+
+No future price is used.
+
+No interpolation is introduced by F010.
+
+No BUY/SELL fallback price is introduced by F010.
+
+## Interaction with other F009 unresolved results
+
+F009 outcomes:
+
+- `CURRENCY_MISMATCH`;
+- `MISSING_ACQUISITION_BASIS`;
+- `UNSUPPORTED_NEGATIVE_POSITION`;
+
+do NOT block TWR merely because those F009 outcomes exist.
+
+They block performance only if the signed security market value required by F010 cannot itself be resolved.
+
+In particular:
+
+- TWR does not require cost-basis resolution;
+- TWR does not require realised-P&L resolution;
+- TWR does not require unrealised-P&L resolution.
+
+If signed security market value resolves, Performance Value may resolve even when another F009-derived result does not.
+
+## Exact arithmetic
+
+Performance calculations use exact arithmetic.
+
+Money follows the project's existing exact-money semantics.
+
+Dimensionless performance ratios use exact rational arithmetic.
+
+This includes:
+
+- daily `G_d`;
+- requested-period TWR.
+
+Canonical performance calculation must not use binary floating-point arithmetic.
+
+No silent rounding is introduced by Decision F010.
+
+## Historical recomputation
+
+Performance is derived state, not an independent canonical source of truth.
+
+Backdated changes to canonical history must affect historical performance when applicable.
+
+This includes:
+
+- creation of backdated Transactions;
+- correction of historical Transactions;
+- deletion of historical Transactions where existing canonical correction semantics allow deletion;
+- addition of historical MarketPriceObservation records;
+- correction/change of historical MarketPriceObservation records.
+
+Affected historical Portfolio values and requested-period performance must be recomputed from the resulting canonical facts and approved methodology.
+
+Decision F010 does not introduce persisted performance snapshots that override canonical reconstruction.
+
+## Explicit unresolved reason vocabulary
+
+Decision F010 uses the following performance unresolved reasons:
+
+```text
+MISSING_MARKET_PRICE
+MULTI_CURRENCY_PERFORMANCE_REQUIRES_FX
+NON_POSITIVE_CAPITAL_BASE
+ZERO_CAPITAL_BASE_WITH_POSITIVE_VALUE
+NEGATIVE_PERFORMANCE_VALUE
+NO_CAPITAL_AT_RISK
+```
+
+These reason codes represent the approved financial conditions defined above.
+
+They are not placeholders for alternative fallback calculations.
+
+## Explicitly deferred
+
+Decision F010 does not define:
+
+- XIRR;
+- FX conversion;
+- multi-currency performance through FX;
+- risk-adjusted performance;
+- volatility;
+- drawdown methodology;
+- benchmark methodology except through a separate approved Decision.
+
+**Reason**
+
+Portfolio performance must measure the change in economic Portfolio value while neutralizing external owner capital movements.
+
+Using:
+
+```text
+canonical F008 cash
++
+F009 signed security market value
+```
+
+provides the required Performance Value without double counting derived accounting results.
+
+Only DEPOSIT/WITHDRAWAL are external owner flows because BUY/SELL and income/expense transactions operate inside the Portfolio's economic state.
+
+The start-of-day treatment for already-netted same-day external flows gives one deterministic v1 timing convention without introducing intraday performance methodology.
+
+Explicit capital-base/value conditions prevent undefined or misleading returns from being silently represented as valid TWR.
+
+Exact rational arithmetic preserves the project's exact financial-calculation policy.
+
+**Consequences**
+
+Portfolio TWR can be reconstructed from canonical history plus approved cash, quantity and market-value semantics.
+
+Cost basis, realised P&L and unrealised P&L are not required inputs to performance.
+
+Actually recorded FEE/TAX reduce performance through cash, while actually recorded DIVIDEND/COUPON increase performance through cash.
+
+A complete withdrawal to zero value produces a neutral daily factor rather than deleting prior performance history.
+
+A zero market price remains valid and can legitimately produce a `-100%` daily growth factor.
+
+Negative cash is not independently disqualifying if total Performance Value and adjusted capital base remain valid.
+
+Requested-period TWR is all-or-unresolved; there is no partial-period fallback.
+
+Historical canonical corrections and historical price changes recompute derived historical performance.
+
+Performance remains single-currency until an FX methodology is approved.
+
+XIRR remains deferred.
+
+---
+
+# Decision F011 — Single-instrument benchmark simulation and comparison
+
+**Decision**
+
+Decision F011 defines the v1 benchmark as one manually selected canonical Instrument.
+
+The benchmark is a frictionless, price-only simulation using existing canonical MarketPriceObservation data and approved F009 price-selection semantics.
+
+The benchmark is calculated for the same requested period:
+
+```text
+[S, E]
+```
+
+as Portfolio performance under Decision F010.
+
+## Benchmark Instrument
+
+The benchmark consists of exactly one selected canonical Instrument.
+
+The benchmark must use the same currency as the Portfolio performance calculation.
+
+No FX conversion is introduced.
+
+Benchmark v1 does not model:
+
+- benchmark dividends;
+- benchmark coupons;
+- benchmark fees;
+- benchmark taxes;
+- corporate actions;
+- total-return adjustments.
+
+It is a price-only benchmark.
+
+## Benchmark prices
+
+Let:
+
+```text
+B_d
+```
+
+be the selected benchmark Instrument price applicable to date `d`.
+
+`B_d` uses the existing F009 latest-applicable MarketPriceObservation semantics.
+
+Therefore benchmark price selection preserves all of the following:
+
+- use the latest applicable observation with effective date `<= d`;
+- never use a future benchmark price;
+- no interpolation;
+- no first-price-after-date fallback;
+- no inferred BUY/SELL price;
+- no independently invented benchmark pricing rule.
+
+If a benchmark price required by the approved simulation cannot be selected because no applicable MarketPriceObservation exists, the benchmark is unresolved as:
+
+```text
+MISSING_BENCHMARK_MARKET_PRICE
+```
+
+If the benchmark price currency is incompatible with the Portfolio performance currency and resolving the comparison would require FX, the benchmark is unresolved as:
+
+```text
+BENCHMARK_CURRENCY_MISMATCH
+```
+
+No FX conversion is inferred.
+
+## Opening benchmark value
+
+The benchmark starts with the actual Portfolio opening Performance Value:
+
+```text
+V_(S-1)
+```
+
+There is no independently chosen benchmark starting capital.
+
+### Positive opening Portfolio value
+
+If:
+
+```text
+V_(S-1) > 0
+```
+
+then an applicable benchmark opening price:
+
+```text
+B_(S-1)
+```
+
+must exist.
+
+It MUST also be strictly positive:
+
+```text
+B_(S-1) > 0
+```
+
+Initial benchmark units are:
+
+```text
+U_(S-1) =
+V_(S-1) / B_(S-1)
+```
+
+If the required opening benchmark price is missing:
+
+```text
+MISSING_BENCHMARK_MARKET_PRICE
+```
+
+If:
+
+```text
+B_(S-1) = 0
+```
+
+the benchmark cannot create opening units and is unresolved as:
+
+```text
+ZERO_BENCHMARK_OPENING_PRICE
+```
+
+A zero benchmark price is valid as a valuation price, but it is not valid as the denominator for opening benchmark-unit creation.
+
+### Zero opening Portfolio value
+
+If:
+
+```text
+V_(S-1) = 0
+```
+
+then:
+
+```text
+U_(S-1) = 0
+```
+
+No opening benchmark purchase is required.
+
+Opening zero capital must not be transformed into an artificial benchmark position.
+
+## Same external owner flows
+
+The benchmark receives exactly the same external owner flows used by F010:
+
+```text
+F_d
+```
+
+Same-day external flows are already netted according to F010.
+
+F011 does not reclassify or renet them using another methodology.
+
+Only F010 DEPOSIT/WITHDRAWAL external owner flows affect benchmark-unit creation/redemption.
+
+## Flow execution price
+
+For every non-zero external flow:
+
+```text
+F_d != 0
+```
+
+the benchmark execution price is:
+
+```text
+B_(d-1)
+```
+
+The applicable:
+
+```text
+B_(d-1)
+```
+
+must exist and MUST be strictly positive.
+
+If the required benchmark flow-execution price is missing:
+
+```text
+MISSING_BENCHMARK_MARKET_PRICE
+```
+
+If:
+
+```text
+B_(d-1) = 0
+```
+
+for a non-zero external flow, the benchmark is unresolved as:
+
+```text
+ZERO_BENCHMARK_FLOW_EXECUTION_PRICE
+```
+
+A zero benchmark price remains valid for valuation, but it cannot be used as a denominator to execute a non-zero simulated owner flow.
+
+For a non-zero flow, benchmark units evolve as:
+
+```text
+U_d =
+U_(d-1)
++
+F_d / B_(d-1)
+```
+
+For a date with:
+
+```text
+F_d = 0
+```
+
+there is no simulated flow execution and no division by `B_(d-1)` for flow creation/redemption.
+
+Benchmark units remain unchanged by owner flow on that date.
+
+## No negative benchmark units
+
+After applying the external flow for date `d`, benchmark units must not be negative.
+
+If:
+
+```text
+U_d < 0
+```
+
+the benchmark is unresolved as:
+
+```text
+BENCHMARK_WITHDRAWAL_EXCEEDS_VALUE
+```
+
+Benchmark v1 does not support:
+
+- negative benchmark units;
+- benchmark shorting;
+- leveraged benchmark exposure.
+
+A withdrawal cannot create a synthetic short benchmark position.
+
+## Benchmark valuation
+
+For each resolved date:
+
+```text
+W_d =
+U_d × B_d
+```
+
+where:
+
+- `U_d` is the exact simulated benchmark-unit quantity after the start-of-day flow;
+- `B_d` is the F009-selected benchmark valuation price;
+- `W_d` is benchmark value.
+
+A benchmark price of zero is valid for valuation.
+
+Therefore:
+
+```text
+B_d = 0
+```
+
+may validly produce:
+
+```text
+W_d = 0
+```
+
+provided the zero price is not being used as a denominator for opening-unit creation or a non-zero simulated flow.
+
+## Benchmark TWR
+
+Benchmark TWR uses the same F010 time-weighted-performance methodology.
+
+F011 does NOT define a separate benchmark-return formula.
+
+The benchmark uses:
+
+- its opening value;
+- the same F010 external owner flows;
+- its simulated daily benchmark values.
+
+The applicable F010 capital-base and TWR rules therefore remain the return methodology for the simulated benchmark path.
+
+## Portfolio performance prerequisite
+
+Benchmark comparison is defined relative to Portfolio performance.
+
+If Portfolio performance for the requested period is unresolved, the Portfolio-vs-benchmark comparison MUST NOT be presented as resolved.
+
+The benchmark comparison outcome is unresolved as:
+
+```text
+UNRESOLVED_PORTFOLIO_PERFORMANCE
+```
+
+No active return or resolved comparative result is reported against an unresolved Portfolio TWR.
+
+In particular, a negative required Portfolio opening value `V_(S-1)` produces
+`UNRESOLVED_PORTFOLIO_PERFORMANCE`. No opening benchmark units are constructed:
+neither zero units nor negative units are used as a fallback.
+
+## Comparison outputs
+
+When both Portfolio performance and benchmark performance resolve:
+
+```text
+active_return =
+PortfolioTWR - BenchmarkTWR
+```
+
+At requested period end:
+
+```text
+ending_value_difference =
+Portfolio ending Performance Value
+-
+benchmark ending value
+```
+
+No other comparison methodology is implied by Decision F011.
+
+## Exact arithmetic
+
+Benchmark calculations preserve exact arithmetic throughout.
+
+Benchmark units:
+
+```text
+U_d
+```
+
+are exact rational quantities.
+
+Benchmark values:
+
+```text
+W_d
+```
+
+are exact.
+
+Benchmark TWR is an exact rational quantity.
+
+`active_return` is an exact rational quantity.
+
+`ending_value_difference` is exact money.
+
+The benchmark calculation must not use binary floating-point arithmetic as canonical methodology.
+
+It must not silently:
+
+- round;
+- truncate;
+- approximate benchmark units;
+- approximate ratios;
+- approximate ending-value difference.
+
+## Benchmark unresolved reason vocabulary
+
+Decision F011 defines the following benchmark unresolved reasons:
+
+```text
+UNRESOLVED_PORTFOLIO_PERFORMANCE
+MISSING_BENCHMARK_MARKET_PRICE
+BENCHMARK_CURRENCY_MISMATCH
+ZERO_BENCHMARK_OPENING_PRICE
+ZERO_BENCHMARK_FLOW_EXECUTION_PRICE
+BENCHMARK_WITHDRAWAL_EXCEEDS_VALUE
+ZERO_CAPITAL_BASE_WITH_POSITIVE_VALUE
+```
+
+Their financial conditions are:
+
+### UNRESOLVED_PORTFOLIO_PERFORMANCE
+
+Portfolio performance required for comparison is itself unresolved.
+
+The comparison must not be presented as resolved.
+
+### MISSING_BENCHMARK_MARKET_PRICE
+
+A benchmark price required by the approved opening, flow-execution, valuation, or benchmark-performance calculation has no applicable F009 MarketPriceObservation.
+
+No future price or interpolation is substituted.
+
+### BENCHMARK_CURRENCY_MISMATCH
+
+The benchmark price currency does not match the Portfolio performance currency and resolving it would require unapproved FX conversion.
+
+### ZERO_BENCHMARK_OPENING_PRICE
+
+Opening Portfolio value is positive, but:
+
+```text
+B_(S-1) = 0
+```
+
+so initial benchmark units cannot be created through division by the opening benchmark price.
+
+### ZERO_BENCHMARK_FLOW_EXECUTION_PRICE
+
+There is a non-zero external owner flow on date `d`, but:
+
+```text
+B_(d-1) = 0
+```
+
+so the simulated benchmark flow cannot be executed without division by zero.
+
+### BENCHMARK_WITHDRAWAL_EXCEEDS_VALUE
+
+Applying the external withdrawal would produce:
+
+```text
+U_d < 0
+```
+
+which would require unsupported negative benchmark units.
+
+### ZERO_CAPITAL_BASE_WITH_POSITIVE_VALUE
+
+If benchmark adjusted capital base is zero while benchmark closing value is positive, benchmark TWR is unresolved under the same F010 rule as Portfolio TWR.
+
+```text
+W_(d-1) + F_d = 0
+and
+W_d > 0
+→ ZERO_CAPITAL_BASE_WITH_POSITIVE_VALUE
+```
+
+This includes benchmark price recovery above zero after a valid zero-price day, with no external flow. The prior `-100%` must not be preserved as a resolved requested-period result; the recovery date must not be skipped or assigned `G = 1`. `UNRESOLVED_PORTFOLIO_PERFORMANCE` must not be used when Portfolio performance itself is resolved.
+
+## Explicitly deferred
+
+Decision F011 does not define:
+
+- multiple benchmark Instruments;
+- weighted benchmark portfolios;
+- total-return indices;
+- benchmark dividend reinvestment;
+- benchmark coupon reinvestment;
+- benchmark corporate-action handling;
+- benchmark fees;
+- benchmark taxes;
+- benchmark FX conversion;
+- benchmark FX P&L;
+- short benchmark positions;
+- leveraged benchmark exposure;
+- tracking error;
+- alpha;
+- beta;
+- volatility;
+- other risk analytics;
+- persisted benchmark preference.
+
+**Reason**
+
+A single manually selected canonical Instrument is the smallest benchmark capable of providing a useful alternative price path without creating a new benchmark-data model.
+
+Starting with actual Portfolio opening value and applying the same external owner flows makes Portfolio and benchmark outcomes economically comparable.
+
+Using `B_(d-1)` for flow execution mirrors the F010 start-of-day owner-flow convention.
+
+Reusing F009 latest-applicable market-price semantics prevents benchmark calculation from silently developing its own historical price-selection methodology.
+
+A frictionless price-only benchmark deliberately avoids introducing unapproved total-return, corporate-action, FX, fee or tax methodology.
+
+Exact rational benchmark units allow external flows to be simulated without approximation or binary floating-point drift.
+
+**Consequences**
+
+A Portfolio performance request can compare the Portfolio with one selected canonical Instrument.
+
+Both paths start from the same Portfolio opening value and receive the same external owner flows.
+
+Benchmark valuation may legitimately use a zero price, but zero cannot be used as a denominator for positive opening-capital allocation or non-zero external-flow execution.
+
+Withdrawals cannot create negative benchmark units.
+
+Portfolio-vs-benchmark comparison does not resolve when Portfolio performance itself is unresolved.
+
+Benchmark TWR reuses F010 instead of defining a competing return methodology.
+
+`active_return` remains exact rational, while ending-value difference remains exact money.
+
+Benchmark v1 remains a same-currency, price-only simulation.
+
+---

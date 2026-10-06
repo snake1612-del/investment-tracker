@@ -8,41 +8,13 @@ from decimal import Decimal
 from fractions import Fraction
 from types import MappingProxyType
 
+from app.domain.portfolio.engine.exact import ExactMoney as ExactMoney
 from app.domain.portfolio.engine.exact import decimal_to_scaled_int, scaled_int_to_decimal
-from app.domain.transactions import TransactionType, valid_currency_code
+from app.domain.transactions import TransactionType
 
 
 class FifoReconstructionError(ValueError):
     """Required F004 facts cannot be reconstructed without fabrication."""
-
-
-@dataclass(frozen=True)
-class ExactMoney:
-    amount: Fraction
-    currency_code: str
-
-    def __post_init__(self) -> None:
-        if (
-            not isinstance(self.amount, Fraction)
-            or not isinstance(self.currency_code, str)
-            or not valid_currency_code(self.currency_code)
-        ):
-            raise ValueError("ExactMoney requires a Fraction and canonical currency code")
-
-    def __add__(self, other: ExactMoney) -> ExactMoney:
-        if self.currency_code != other.currency_code:
-            raise ValueError("Cannot add basis in different currencies")
-        return ExactMoney(self.amount + other.amount, self.currency_code)
-
-    def __sub__(self, other: ExactMoney) -> ExactMoney:
-        if self.currency_code != other.currency_code:
-            raise ValueError("Cannot subtract money in different currencies")
-        return ExactMoney(self.amount - other.amount, self.currency_code)
-
-    def allocated(self, quantity_units: int, original_units: int) -> ExactMoney:
-        return ExactMoney(
-            self.amount * Fraction(quantity_units, original_units), self.currency_code
-        )
 
 
 @dataclass(frozen=True)

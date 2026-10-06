@@ -1,6 +1,39 @@
 """Small context-independent conversions shared by F003 and F004."""
 
+from dataclasses import dataclass
 from decimal import Decimal
+from fractions import Fraction
+
+from app.domain.transactions import valid_currency_code
+
+
+@dataclass(frozen=True)
+class ExactMoney:
+    amount: Fraction
+    currency_code: str
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.amount, Fraction)
+            or not isinstance(self.currency_code, str)
+            or not valid_currency_code(self.currency_code)
+        ):
+            raise ValueError("ExactMoney requires a Fraction and canonical currency code")
+
+    def __add__(self, other: ExactMoney) -> ExactMoney:
+        if self.currency_code != other.currency_code:
+            raise ValueError("Cannot add basis in different currencies")
+        return ExactMoney(self.amount + other.amount, self.currency_code)
+
+    def __sub__(self, other: ExactMoney) -> ExactMoney:
+        if self.currency_code != other.currency_code:
+            raise ValueError("Cannot subtract money in different currencies")
+        return ExactMoney(self.amount - other.amount, self.currency_code)
+
+    def allocated(self, quantity_units: int, original_units: int) -> ExactMoney:
+        return ExactMoney(
+            self.amount * Fraction(quantity_units, original_units), self.currency_code
+        )
 
 
 def decimal_to_scaled_int(value: Decimal, scale: int) -> int:

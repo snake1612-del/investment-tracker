@@ -19,6 +19,11 @@ import { CorrectionDialog } from "./correction-dialog";
 import { History, Holdings, RealisedResult } from "./workspace-views";
 import { MarketPrices } from "./market-prices";
 import { ValuationView, type Valuation } from "./valuation-view";
+import {
+  PerformanceView,
+  periodError,
+  type Performance,
+} from "./performance-view";
 
 function useRead<T>(path: string | null, revision = 0) {
   const [state, setState] = useState<{
@@ -328,6 +333,9 @@ function AccountWorkspace({
   const [tab, setTab] = useState("Holdings");
   const [asOf, setAsOf] = useState(localDate);
   const [valuationDate, setValuationDate] = useState(localDate);
+  const [performanceStart, setPerformanceStart] = useState(localDate);
+  const [performanceEnd, setPerformanceEnd] = useState(localDate);
+  const [benchmark, setBenchmark] = useState("");
   const [revision, setRevision] = useState(0);
   const [recording, setRecording] = useState(false);
   const [correction, setCorrection] = useState<{
@@ -359,16 +367,26 @@ function AccountWorkspace({
       : null,
     revision + priceRevision,
   );
+  const performance = useRead<Performance>(
+    !account &&
+      tab === "Performance" &&
+      !periodError(performanceStart, performanceEnd)
+      ? `/portfolios/${portfolio.id}/performance?start_date=${performanceStart}&end_date=${performanceEnd}${benchmark ? `&benchmark_instrument_id=${benchmark}` : ""}`
+      : null,
+    revision + priceRevision,
+  );
   const active =
-    tab === "Holdings"
-      ? positions
-      : tab === "History"
-        ? history
-        : tab === "Money"
-          ? money
-          : tab === "Valuation"
-            ? valuation
-            : result;
+    tab === "Performance"
+      ? performance
+      : tab === "Holdings"
+        ? positions
+        : tab === "History"
+          ? history
+          : tab === "Money"
+            ? money
+            : tab === "Valuation"
+              ? valuation
+              : result;
   return (
     <section className="account-workspace">
       <div className="workspace-heading">
@@ -395,7 +413,13 @@ function AccountWorkspace({
         <div role="tablist" aria-label="Workspace views">
           {(account
             ? ["Holdings", "History", "Money", "Realised result", "Valuation"]
-            : ["Holdings", "Money", "Realised result", "Valuation"]
+            : [
+                "Holdings",
+                "Money",
+                "Realised result",
+                "Valuation",
+                "Performance",
+              ]
           ).map((name) => (
             <button
               key={name}
@@ -435,7 +459,26 @@ function AccountWorkspace({
         className="panel"
         aria-busy={active.loading}
       >
-        {tab === "Valuation" ? (
+        {tab === "Performance" ? (
+          <>
+            <PerformanceView
+              data={performance.data}
+              start={performanceStart}
+              end={performanceEnd}
+              benchmark={benchmark}
+              setStart={setPerformanceStart}
+              setEnd={setPerformanceEnd}
+              setBenchmark={setBenchmark}
+              instruments={metadata}
+            />
+            {performance.loading && <p role="status">Loading performance…</p>}
+            {performance.error && (
+              <p role="alert" className="error">
+                {performance.error} Use Refresh to retry.
+              </p>
+            )}
+          </>
+        ) : tab === "Valuation" ? (
           <>
             <ValuationView
               data={valuation.data}
