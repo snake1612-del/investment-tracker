@@ -164,6 +164,78 @@ async function createContext(page: Page) {
   return suffix;
 }
 
+test("manual prices drive exact valuation and explicit missing-price state", async ({
+  page,
+}, testInfo) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  const suffix = await createContext(page);
+  const name = `Valued ${suffix}`;
+  await record(page, "Buy", "10", name, "2");
+  await page.getByRole("tab", { name: "Valuation", exact: true }).click();
+  await page.getByLabel("Valuation as-of date").fill("2026-02-02");
+  await expect(
+    page.getByText("Market value: Unresolved", { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText(/Missing market price · Account/)).toBeVisible();
+  await page
+    .getByRole("button", { name: "Market prices", exact: true })
+    .click();
+  const selector = page.getByLabel("Price Instrument");
+  await expect(selector).toBeVisible();
+  const option = (await selector.locator("option").allTextContents()).find(
+    (label) => label.startsWith(`${name} ·`),
+  )!;
+  await selector.selectOption({ label: option });
+  await page
+    .getByRole("button", { name: "Add market price", exact: true })
+    .click();
+  let dialog = page.getByRole("dialog");
+  await dialog.getByLabel("Unit market price").fill("20");
+  await dialog.getByLabel("Price effective date").fill("2026-02-01");
+  await dialog.getByRole("button", { name: "Save market price" }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(
+    page.getByText("Market value: 40 USD", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Unrealised result: 30 USD", { exact: true }),
+  ).toBeVisible();
+  await page.screenshot({
+    path: testInfo.outputPath("valuation.png"),
+    fullPage: true,
+  });
+  await page
+    .getByRole("button", { name: "Edit price 2026-02-01", exact: true })
+    .click();
+  dialog = page.getByRole("dialog");
+  await dialog.getByLabel("Unit market price").fill("0");
+  await dialog.getByRole("button", { name: "Save market price" }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(
+    page.getByText("Market value: 0 USD", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Unrealised result: −10 USD", { exact: true }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Delete price 2026-02-01", exact: true })
+    .click();
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "Confirm delete price" })
+    .click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(
+    page.getByText("Market value: Unresolved", { exact: true }),
+  ).toBeVisible();
+  await page.getByLabel("Account", { exact: true }).selectOption("summary");
+  await page.getByRole("tab", { name: "Valuation", exact: true }).click();
+  await page.getByLabel("Valuation as-of date").fill("2026-02-02");
+  await expect(page.getByText(/Incomplete — resolved subtotals/)).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
 async function record(
   page: Page,
   type: "Deposit" | "Buy" | "Sell",

@@ -1123,3 +1123,238 @@ Public amounts are normalized ordinary decimal strings with at most eight fracti
 ## Consequences
 
 Money remains reconstruct-on-read with no snapshot, cache, materialized balance or database migration. Corrections/deletions cause deterministic reconstruction from current history. No cash sufficiency, settled-cash model, FX, tax liability, valuation, performance, net-income/net-P&L or fee-to-basis treatment is defined.
+
+# Decision F009 — Market-price valuation and unrealised P&L reconstruction
+
+## Decision
+
+Valuation and unrealised P&L are recomputable derived financial state.
+
+Canonical Transaction history remains the accounting source of truth for position quantity and acquisition basis.
+
+Market-price observations are separate factual market-data inputs used only for valuation and do not become accounting Transactions.
+
+### Manual market-price observations
+
+A manual market-price observation identifies:
+
+- one canonical Instrument;
+- an exact direct monetary unit price;
+- one price currency;
+- an effective date.
+
+Market price MUST be greater than or equal to zero.
+
+Negative market prices are outside F009.
+
+A zero market price is valid.
+
+The observation price represents monetary value per canonical Instrument quantity unit.
+
+F009 does not define percentage-of-par bond quotation, clean/dirty price, accrued interest, contract multipliers or another non-direct quotation system.
+
+The observation effective date is the date for which the market price is financially applicable.
+
+F009 introduces no intraday price-time methodology.
+
+Technical creation or insertion time does not determine valuation.
+
+### Price selection
+
+For valuation as of date `D`, select the latest known market-price observation for the Instrument whose effective date is less than or equal to `D`.
+
+No future observation may be used.
+
+No interpolation is performed.
+
+BUY/SELL `price`, `cash_amount / quantity` or another Transaction fact MUST NOT be used as an implicit fallback market price.
+
+If a non-zero position has no applicable price observation, market value and unrealised P&L are unresolved with reason:
+
+`MISSING_MARKET_PRICE`
+
+F009 defines no price-staleness threshold.
+
+The effective date of the selected observation remains part of the valuation provenance.
+
+### Market value
+
+Let:
+
+- `Q` be the F003 reconstructed position quantity as of `D`;
+- `P` be the selected applicable market price.
+
+For a non-zero priced position:
+
+`market value = Q × P`
+
+The result is denominated in the selected market-price currency.
+
+For `Q > 0`, market value is positive when price is positive.
+
+For `Q = 0`, market value is exactly zero and no market-price observation is required.
+
+For `Q < 0`, a selected market price produces a negative signed market value.
+
+Computing signed market value for a negative reconstructed position does not establish short-selling cost-basis or short unrealised-P&L methodology.
+
+### Long-position unrealised P&L
+
+Unrealised P&L uses F004 remaining acquisition lots and remaining acquisition basis as of the same date `D`.
+
+For an open supported long lot with:
+
+- remaining quantity `q`;
+- remaining acquisition basis `B`;
+- selected market price `P`;
+
+the lot market value is:
+
+`lot market value = q × P`
+
+If the lot acquisition-basis currency equals the selected market-price currency:
+
+`lot unrealised P&L = lot market value - remaining acquisition basis`
+
+The result is exact and denominated in that shared currency.
+
+Positive results are unrealised gains.
+
+Negative results are unrealised losses.
+
+Zero is valid.
+
+Only remaining open basis participates.
+
+Acquisition basis already removed by realised SELL disposal does not participate in unrealised P&L.
+
+### Mixed basis currencies
+
+A selected market price has one currency.
+
+If an open lot's remaining acquisition-basis currency differs from the selected price currency, numeric unrealised P&L for that lot is unresolved with reason:
+
+`CURRENCY_MISMATCH`
+
+The marked value and acquisition-basis facts remain preserved independently.
+
+Other open lots of the same Instrument whose basis currency matches the price currency may still produce resolved unrealised P&L.
+
+A single Instrument may therefore have partially resolved unrealised P&L.
+
+### Unmatched SELL and incomplete long basis
+
+If the as-of F004 reconstruction contains unmatched SELL quantity while F003 reports a positive net position, F009 MUST NOT treat all remaining F004 BUY lots as the acquisition basis of that net position.
+
+In this state current long-position unrealised P&L is unresolved with reason:
+
+`MISSING_ACQUISITION_BASIS`
+
+F009 does not match later BUY lots retroactively to earlier unmatched SELLs and does not invent short-cover methodology.
+
+### Negative positions
+
+For a negative F003 position quantity, market value may still be calculated as the signed quantity multiplied by an applicable market price.
+
+Unrealised P&L is unresolved with reason:
+
+`UNSUPPORTED_NEGATIVE_POSITION`
+
+F009 does not define short-sale acquisition basis, borrow, margin or short-cover P&L.
+
+### Zero positions
+
+A zero reconstructed position has:
+
+- market value = 0;
+- current unrealised P&L = 0.
+
+No market price is required.
+
+This does not resolve historical realised-P&L or short-accounting questions; it only defines current valuation for zero net quantity.
+
+### Currency aggregation
+
+Market value and resolved unrealised P&L aggregate only within identical currencies.
+
+Different currencies MUST NOT be added or converted without separate FX methodology.
+
+Account reconstruction occurs independently before Portfolio aggregation.
+
+Portfolio results remain partitioned by currency.
+
+If unresolved valuation or unrealised components exist, resolved currency subtotals remain usable but MUST NOT be represented as complete totals.
+
+### Interaction with existing financial events
+
+F009 does not modify F004 or F005.
+
+FEE and TAX do not modify F009 remaining acquisition basis.
+
+DIVIDEND and COUPON do not modify position market value or acquisition basis.
+
+Gross realised trade-cash P&L is separate from unrealised P&L and is not added into F009 calculations.
+
+Cash, DEPOSIT and WITHDRAWAL are not included in F009 security market value.
+
+F009 therefore does not define total Portfolio NAV or net liquidation value.
+
+### Exact arithmetic
+
+Market-price input must preserve its exact factual decimal value without binary floating point or silent rounding.
+
+Market value is the exact product of quantity and price.
+
+F004 remaining acquisition basis remains exact rational financial state.
+
+Same-currency unrealised P&L is the exact subtraction of marked value and remaining basis.
+
+Aggregation uses exact arithmetic within each currency.
+
+No financial display rounding, Decimal-context rounding, silent truncation or cross-currency conversion is part of F009.
+
+### Recalculation
+
+Valuation and unrealised P&L are fully recomputable as-of-date derived state.
+
+Backdated Transaction changes may alter F003 positions and F004 remaining basis.
+
+Backdated, corrected or newly available market-price observations may alter the selected as-of price.
+
+Derived valuation results always reflect the current canonical financial history and current applicable market-price observations.
+
+## Reason
+
+F003 and F004 already provide exact reconstructed quantity and long-position acquisition basis.
+
+A manual market-price observation provides the only additional fact required to mark an open security position without introducing an external market-data provider.
+
+Selecting the latest observation not later than the valuation date avoids look-ahead and permits historical as-of valuation without interpolation.
+
+Using explicit price currency and preserving currency partitions avoids implicit FX.
+
+Separating market value from unrealised-P&L resolution permits factual signed valuation of negative quantities while correctly refusing to invent unsupported short-position basis.
+
+Per-lot same-currency unrealised P&L also preserves usable resolved results where other lots require FX.
+
+Explicit unresolved states prevent missing market prices, incomplete acquisition basis and currency mismatches from being misrepresented as zero.
+
+## Consequences
+
+The financial domain may reconstruct as-of security market value and long-position unrealised P&L without valuation providers, FX or performance methodology.
+
+Market value uses F003 quantity and the latest applicable manual price observation.
+
+Zero positions value to zero without requiring a price.
+
+Negative positions can have signed market value but do not receive short-position unrealised P&L.
+
+Supported long-position unrealised P&L uses only remaining F004 basis.
+
+Missing prices, unmatched long-basis history and currency mismatches remain explicit unresolved states.
+
+Same-currency resolved market values and unrealised results may aggregate by Account and Portfolio while currencies remain partitioned.
+
+Fees, taxes, dividends, coupons, cash and realised P&L remain separate financial dimensions.
+
+F009 does not define database schema, public API, frontend presentation, external quote providers, automatic price import, FX conversion, total Portfolio NAV, performance, TWR, XIRR or benchmark methodology.

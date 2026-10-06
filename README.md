@@ -22,7 +22,7 @@ The revised MVP v0.1 is a usable personal manual investment journal. Manual Port
 - Public Account and Portfolio reads expose exact position quantities, gross trade-cash realised P&L, and as-of-date Money summaries with recorded cash and separate income/outflow totals by currency.
 - FIFO lots and cost-basis reconstruction are internal, recomputable derived capabilities, not public lot/cost-basis APIs.
 - Financial facts preserve independent quantity / price / cash inputs. Realised P&L uses exact rational money, remains partitioned by currency, and explicitly reports unresolved missing-basis or currency-mismatch components. It is not net, tax-adjusted or FX-converted profit.
-- The browser supports Portfolio/Account browsing and creation, Instrument selection/creation, manual DEPOSIT / WITHDRAWAL / BUY / SELL / DIVIDEND / COUPON / FEE / TAX, Account History with edit/hard-delete for all eight types, and Account/Portfolio Holdings, Money and gross realised results. Fee/Tax can be standalone or linked for context. Valuation, unrealised P&L, performance, benchmark and imports remain future capabilities.
+- The browser supports Portfolio/Account browsing and creation, Instrument selection/creation, manual DEPOSIT / WITHDRAWAL / BUY / SELL / DIVIDEND / COUPON / FEE / TAX, Account History with edit/hard-delete for all eight types, and Account/Portfolio Holdings, Money, gross realised results and as-of security Valuation. Instrument market-price history supports create/edit/hard-delete. Fee/Tax can be standalone or linked for context. Performance, benchmark and imports remain future capabilities.
 
 ## Documentation
 
@@ -69,7 +69,7 @@ pnpm build
 
 Start the API on `127.0.0.1:8000` and open the web server (normally `http://localhost:3000`). Web requests use a same-origin `/api` server-side proxy to the API; set the server-side `API_URL` before starting web if the API endpoint differs. This is a local single-user workflow, not an authentication or public-deployment boundary.
 
-Workspace context is Portfolio → Account, with a Portfolio summary option. Account views are Holdings / History / Money / Realised result; Portfolio summary has Holdings / Money / Realised result, without transaction entry or History. Creation and recording use dialogs. BUY/SELL quantity, price and cash remain independent decimal-string inputs; mismatch and oversell do not block valid entry. Income entry requires gross income; known withholding is a separate Tax, and net-only source data is deferred.
+Workspace context is Portfolio → Account, with a Portfolio summary option. Account views are Holdings / History / Money / Realised result / Valuation; Portfolio summary has Holdings / Money / Realised result / Valuation, without transaction entry or History. Creation and recording use dialogs. BUY/SELL quantity, price and cash remain independent decimal-string inputs; mismatch and oversell do not block valid entry. Income entry requires gross income; known withholding is a separate Tax, and net-only source data is deferred.
 
 History Edit replaces approved factual fields in place, preserving ID, type, Account, creation metadata and note. Fee/Tax optional Instrument and relation are editable with explicit clearing. Delete requires confirmation and permanently removes the canonical event; there is no undo or audit history. Both refresh History, Holdings, Money and Realised result. Derived matches never block a correction, but an inbound canonical related transaction blocks deletion (409), until its Fee/Tax link is explicitly cleared/changed or its child deleted. Backdated corrections can change FIFO and past realised results; concurrent stale-tab writes are last-write-wins. See F006–F008 and Decisions 017–018 for the complete contract.
 
@@ -78,6 +78,8 @@ Money uses an explicit as-of effective date, initially browser-local today. Chan
 Exact-money presentation uses native BigInt rationals, currency suffixes and at most eight decimal places. Non-exact display rounding is half away from zero and marked `≈`; original rational values remain unchanged and display values never feed writes/calculations. No currency totals or FX conversion are performed.
 
 ### Browser E2E
+
+Valuation has a separate explicit as-of date and uses the latest applicable manual unit price. Open **Market prices** to select an Instrument and record/correct/delete an observation. Zero price is valid; Instrument/date collisions return 409. Security valuation excludes cash/income/realised result and is not NAV. Unrealised result uses remaining FIFO basis, preserves currency partitions and explicit unresolved states, and reuses exact rational-money presentation (≈ is display-only approximation). Portfolio shows independent Account contributions, so offsetting quantities cannot hide unresolved state. See F009 and Decision 020.
 
 The Playwright suite covers the full journal journey, incomplete oversell results, correction/deletion of a consumed BUY, and gross income/linked Tax/Money/correction/FK-conflict flows on desktop and narrow viewports. It writes uniquely named synthetic records through the browser, so **do not point its API at a personal/development-data database**.
 
