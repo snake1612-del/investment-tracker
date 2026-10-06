@@ -15,7 +15,9 @@ from app.application.use_cases import (
 from app.infrastructure.db.unit_of_work import SqlAlchemyUnitOfWork
 
 
-def test_migration_creates_only_initial_tables(test_session_factory: sessionmaker[Session]) -> None:
+def test_migration_creates_only_approved_tables(
+    test_session_factory: sessionmaker[Session],
+) -> None:
     engine = test_session_factory.kw["bind"]
     inspector = inspect(engine)
     assert set(inspector.get_table_names()) == {
@@ -24,6 +26,7 @@ def test_migration_creates_only_initial_tables(test_session_factory: sessionmake
         "investment_accounts",
         "instruments",
         "transactions",
+        "market_price_observations",
     }
     assert {index["name"] for index in inspector.get_indexes("investment_accounts")} == {
         "ix_investment_accounts_portfolio_id"

@@ -17,6 +17,8 @@ import {
 import { MoneyView, type MoneySummary } from "./money-view";
 import { CorrectionDialog } from "./correction-dialog";
 import { History, Holdings, RealisedResult } from "./workspace-views";
+import { MarketPrices } from "./market-prices";
+import { ValuationView, type Valuation } from "./valuation-view";
 
 function useRead<T>(path: string | null, revision = 0) {
   const [state, setState] = useState<{
@@ -58,6 +60,8 @@ export default function Workspace() {
   } | null>(null);
   const [creating, setCreating] = useState(false);
   const [feedback, setFeedback] = useState("");
+  const [pricesOpen, setPricesOpen] = useState(false);
+  const [priceRevision, setPriceRevision] = useState(0);
   const active =
     portfolios.data?.find((p) => String(p.id) === selected) ??
     portfolios.data?.[0];
@@ -70,6 +74,17 @@ export default function Workspace() {
         </div>
         <span className="journal-label">Portfolio workspace</span>
       </header>
+      <button
+        className="secondary"
+        onClick={() => setPricesOpen((value) => !value)}
+      >
+        {pricesOpen ? "Close market prices" : "Market prices"}
+      </button>
+      {pricesOpen && (
+        <MarketPrices
+          onChanged={() => setPriceRevision((value) => value + 1)}
+        />
+      )}
       {feedback && (
         <p className="success" role="status">
           {feedback}
@@ -134,6 +149,7 @@ export default function Workspace() {
         <PortfolioContext
           key={active.id}
           portfolio={active}
+          priceRevision={priceRevision}
           selected={
             accountSelection?.portfolioId === active.id
               ? accountSelection.value
@@ -178,11 +194,13 @@ export default function Workspace() {
 
 function PortfolioContext({
   portfolio,
+  priceRevision,
   selected,
   onSelected,
   onFeedback,
 }: {
   portfolio: Entity;
+  priceRevision: number;
   selected: string;
   onSelected: (value: string) => void;
   onFeedback: (message: string) => void;
@@ -273,6 +291,7 @@ function PortfolioContext({
           <AccountWorkspace
             key={account?.id ?? "summary"}
             portfolio={portfolio}
+            priceRevision={priceRevision}
             account={account}
             onFeedback={onFeedback}
           />
@@ -297,15 +316,18 @@ function PortfolioContext({
 
 function AccountWorkspace({
   portfolio,
+  priceRevision,
   account,
   onFeedback,
 }: {
   portfolio: Entity;
+  priceRevision: number;
   account?: Account;
   onFeedback: (message: string) => void;
 }) {
   const [tab, setTab] = useState("Holdings");
   const [asOf, setAsOf] = useState(localDate);
+  const [valuationDate, setValuationDate] = useState(localDate);
   const [revision, setRevision] = useState(0);
   const [recording, setRecording] = useState(false);
   const [correction, setCorrection] = useState<{
@@ -331,6 +353,12 @@ function AccountWorkspace({
     account ? `${scope}/transactions` : null,
     revision,
   );
+  const valuation = useRead<Valuation>(
+    tab === "Valuation" && !dateError(valuationDate)
+      ? `${scope}/valuation?as_of_date=${valuationDate}`
+      : null,
+    revision + priceRevision,
+  );
   const active =
     tab === "Holdings"
       ? positions
@@ -338,7 +366,9 @@ function AccountWorkspace({
         ? history
         : tab === "Money"
           ? money
-          : result;
+          : tab === "Valuation"
+            ? valuation
+            : result;
   return (
     <section className="account-workspace">
       <div className="workspace-heading">
@@ -364,8 +394,8 @@ function AccountWorkspace({
       <div className="toolbar">
         <div role="tablist" aria-label="Workspace views">
           {(account
-            ? ["Holdings", "History", "Money", "Realised result"]
-            : ["Holdings", "Money", "Realised result"]
+            ? ["Holdings", "History", "Money", "Realised result", "Valuation"]
+            : ["Holdings", "Money", "Realised result", "Valuation"]
           ).map((name) => (
             <button
               key={name}
@@ -405,7 +435,21 @@ function AccountWorkspace({
         className="panel"
         aria-busy={active.loading}
       >
-        {tab === "Money" ? (
+        {tab === "Valuation" ? (
+          <>
+            <ValuationView
+              data={valuation.data}
+              asOf={valuationDate}
+              setAsOf={setValuationDate}
+            />
+            {valuation.loading && <p role="status">Loading valuation…</p>}
+            {valuation.error && (
+              <p role="alert" className="error">
+                {valuation.error} Use Refresh to retry.
+              </p>
+            )}
+          </>
+        ) : tab === "Money" ? (
           <>
             <MoneyView
               data={money.data}

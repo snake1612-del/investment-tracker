@@ -8,6 +8,7 @@ from app.api.routes.instruments import router as instruments_router
 from app.api.routes.money import router as money_router
 from app.api.routes.portfolios import router as portfolios_router
 from app.api.routes.transactions import router as transactions_router
+from app.api.routes.valuation import router as valuation_router
 
 app = FastAPI(title="Investment Tracker API")
 app.include_router(health_router)
@@ -17,4 +18,5 @@ app.include_router(instruments_router)
 app.include_router(transactions_router)
 app.include_router(cash_router)
 app.include_router(money_router)
+app.include_router(valuation_router)
 register_error_handlers(app)

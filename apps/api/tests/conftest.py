@@ -93,7 +93,8 @@ def clean_db(test_session_factory: sessionmaker[Session]) -> sessionmaker[Sessio
     with engine.begin() as connection:
         connection.execute(
             text(
-                "TRUNCATE transactions, investment_accounts, instruments, portfolios "
+                "TRUNCATE market_price_observations, transactions, investment_accounts, "
+                "instruments, portfolios "
                 "RESTART IDENTITY"
             )
         )

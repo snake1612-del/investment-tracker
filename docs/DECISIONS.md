@@ -3528,3 +3528,423 @@ A one-command local runtime makes the existing journal reproducible while the ap
 No financial methodology, API contract, schema or product UX changes are required. Preserve Decisions 001–018 and F001–F008 substantively. Local Docker may be delivered independently; approved cloud architecture is not a claim of cloud implementation. Factual implementation/readiness lives in OPERATIONS and README.
 
 Stop before substituting another topology if Vercel Services/account behavior blocks the approved design. Stop before purchase/upgrade if two separate Neon projects cannot be provisioned under the approved account limits. Never alter unrelated resources to release capacity. If deployment protection requires an unapproved paid change, production real-data readiness is blocked. No cloud readiness may be claimed without environment isolation, access protection, direct-endpoint connectivity and the backup/restore gate being verified. Decommission the unused Supabase Investment Tracker Staging only after both Neon environments pass end-to-end acceptance; restore Fitness RPG Pilot only if safe Free capacity is available, and never alter AI Wardrobe.
+
+# Decision 020 — Manual market prices, valuation and unrealised P&L
+
+## Decision
+
+Valuation & Unrealised Result v0.1 is implemented as one additive vertical slice:
+
+manual MarketPriceObservation
+→ persisted price history
+→ Account canonical history
+→ F003 position reconstruction
+→ F004 FIFO remaining basis reconstruction
+→ F009 price selection / valuation
+→ Account valuation result
+→ Account-first Portfolio aggregation
+→ lossless public API
+
+No derived valuation, market value, selected-price snapshot or unrealised P&L is persisted.
+
+## Persistence
+
+Add exactly one persisted entity:
+
+`MarketPriceObservation`
+
+backed by:
+
+`market_price_observations`
+
+Fields:
+
+- `id` — BIGINT identity primary key;
+- `instrument_id` — BIGINT NOT NULL;
+- `price` — NUMERIC(28,12) NOT NULL;
+- `currency_code` — VARCHAR(3) NOT NULL;
+- `effective_date` — DATE NOT NULL;
+- `created_at` — TIMESTAMPTZ NOT NULL;
+- `updated_at` — TIMESTAMPTZ NOT NULL.
+
+Constraints:
+
+- foreign key `instrument_id → instruments.id`;
+- `ON DELETE RESTRICT`;
+- `price >= 0`;
+- `currency_code` is exactly three uppercase letters;
+- unique `(instrument_id, effective_date)`.
+
+Exactly one manual market-price observation is allowed per Instrument per effective date.
+
+F009 has no intraday ordering semantics, therefore multiple same-day observations are not allowed and no artificial `id` or timestamp winner is introduced.
+
+`NUMERIC(28,12)` matches the existing canonical trade price precision.
+
+Derived market value is not restricted to this persisted precision and remains exact derived financial state.
+
+## Market-price corrections
+
+Manual market prices use ordinary resource correction semantics.
+
+Create adds a new observation.
+
+PUT updates an existing observation in place while preserving:
+
+- `id`;
+- `instrument_id`;
+- `created_at`.
+
+PUT may update:
+
+- `price`;
+- `currency_code`;
+- `effective_date`;
+- `updated_at`.
+
+Changing Instrument is not an edit.
+
+If an observation was recorded for the wrong Instrument, delete it and create a new observation under the correct Instrument.
+
+DELETE is a hard delete.
+
+No soft delete, reversal, revision ledger or audit history is introduced.
+
+Create or update colliding with an existing `(instrument_id, effective_date)` observation returns conflict.
+
+## Repository boundary
+
+Introduce one focused persistence abstraction:
+
+`MarketPriceObservationRepository`
+
+It supports only the capabilities required by this vertical slice:
+
+- add;
+- retrieve/list price history for an Instrument;
+- batch-load relevant observations for valuation;
+- update in place;
+- hard delete.
+
+Do not create a generic repository framework.
+
+## Domain responsibilities
+
+Introduce a small framework-independent F009 domain module alongside the existing portfolio financial engines.
+
+The domain owns:
+
+- latest applicable market-price selection;
+- exact signed market-value calculation;
+- long-position unrealised-P&L reconstruction;
+- unresolved financial semantics;
+- Account aggregation;
+- Account-first Portfolio aggregation.
+
+The domain owns the meanings of:
+
+- `MISSING_MARKET_PRICE`;
+- `CURRENCY_MISMATCH`;
+- `MISSING_ACQUISITION_BASIS`;
+- `UNSUPPORTED_NEGATIVE_POSITION`.
+
+Application and API layers MUST NOT recreate or reinterpret these financial rules.
+
+Price selection uses the latest observation whose `effective_date <= as_of_date`.
+
+No future price, interpolation or Transaction-derived fallback is introduced.
+
+## Exact arithmetic
+
+Existing exact financial primitives are reused.
+
+Position quantity and persisted price are converted losslessly from their scale-12 factual decimal representation.
+
+Market value is represented as an exact rational monetary result.
+
+Existing F005 exact-money wire representation is reused:
+
+{
+  "currency_code": "USD",
+  "amount": {
+    "numerator": "...",
+    "denominator": "..."
+  }
+}
+
+This representation is used for:
+
+- market value;
+- resolved unrealised P&L;
+- exact basis/value legs in unresolved components;
+- Account subtotals;
+- Portfolio subtotals.
+
+Persisted unit price remains an exact finite decimal string in the public API.
+
+A second exact-money API representation is not introduced.
+
+## F003 + F004 + F009 orchestration
+
+For one Account and one `as_of_date`:
+
+1. load canonical Account transaction history once;
+2. reconstruct F003 positions as of the date;
+3. reconstruct F004 FIFO lots/basis as of the same date;
+4. determine involved Instrument IDs;
+5. batch-load relevant MarketPriceObservation history;
+6. apply F009 price selection and valuation;
+7. enrich the resulting read model with Instrument metadata.
+
+Financial as-of filtering and reconstruction semantics belong to the financial domain/application boundary, not to HTTP routes.
+
+Portfolio valuation reconstructs every Account independently first.
+
+Portfolio MUST NOT combine Account transaction histories and run one shared FIFO reconstruction.
+
+Portfolio aggregation combines already reconstructed Account valuation results by identical currency.
+
+No F005 call is part of F009 valuation orchestration.
+
+## Public API — market prices
+
+Expose Instrument-scoped resources:
+
+POST `/instruments/{instrument_id}/market-prices`
+
+GET `/instruments/{instrument_id}/market-prices`
+
+PUT `/instruments/{instrument_id}/market-prices/{observation_id}`
+
+DELETE `/instruments/{instrument_id}/market-prices/{observation_id}`
+
+Create/PUT request contains:
+
+{
+  "price": "182.375",
+  "currency_code": "USD",
+  "effective_date": "2026-10-06"
+}
+
+`price` is an exact decimal string and MUST NOT be represented as a JSON float.
+
+Observation responses include:
+
+- `id`;
+- `instrument_id`;
+- `price`;
+- `currency_code`;
+- `effective_date`;
+- `created_at`;
+- `updated_at`.
+
+List order is:
+
+`effective_date DESC`
+
+## Public API — valuation
+
+Expose:
+
+GET `/accounts/{account_id}/valuation?as_of_date=YYYY-MM-DD`
+
+GET `/portfolios/{portfolio_id}/valuation?as_of_date=YYYY-MM-DD`
+
+`as_of_date` is required.
+
+The response represents:
+
+`SECURITY_VALUATION_AND_UNREALISED_PNL`
+
+and exposes conceptually:
+
+- `as_of_date`;
+- `resolved_market_value_by_currency`;
+- `resolved_unrealised_pnl_by_currency`;
+- per-Instrument results;
+- `is_fully_resolved`.
+
+It does not fold in:
+
+- NAV;
+- cash;
+- realised P&L;
+- fees;
+- taxes;
+- income;
+- FX conversion.
+
+## Per-Instrument valuation result
+
+Each non-zero security position exposes conceptually:
+
+- `instrument_id`;
+- `instrument_name`;
+- `quantity`;
+- selected market-price provenance or `null`;
+- exact market value or `null`;
+- resolved unrealised P&L by currency;
+- unresolved components;
+- `is_fully_resolved`.
+
+Zero positions may be omitted from the public Instrument result list.
+
+If no applicable price exists:
+
+- selected market price is `null`;
+- market value is `null`;
+- an explicit `MISSING_MARKET_PRICE` unresolved component is present.
+
+Missing values are never silently represented as zero.
+
+## Unresolved result contract
+
+Unresolved public components use a discriminated union keyed by:
+
+`reason`
+
+Every unresolved component preserves:
+
+- `account_id`;
+- `instrument_id`;
+- `instrument_name`;
+- `quantity`;
+- `reason`.
+
+`CURRENCY_MISMATCH` preserves both exact financial legs:
+
+- marked market-value component;
+- remaining acquisition basis.
+
+`MISSING_ACQUISITION_BASIS` preserves any valid available market-value component.
+
+`UNSUPPORTED_NEGATIVE_POSITION` preserves valid signed market value when a market price exists.
+
+No fabricated numeric unrealised P&L is returned for unresolved components.
+
+Multiple independent unresolved limitations may coexist.
+
+API code does not choose a financial precedence that is not defined by F009.
+
+## Completeness
+
+Per Instrument:
+
+`is_fully_resolved = no F009 unresolved component for that Instrument contribution`
+
+Per Account:
+
+`is_fully_resolved = all included Instrument results are fully resolved`
+
+Per Portfolio:
+
+`is_fully_resolved = all Account contributions are fully resolved`
+
+Resolved subtotals remain available when overall completeness is false.
+
+Account-first unresolved state MUST NOT disappear because another Account offsets its quantity.
+
+## Currency aggregation
+
+Resolved market value and resolved unrealised P&L are aggregated only within identical currencies.
+
+Currency output ordering is deterministic:
+
+`currency_code ASC`
+
+No cross-currency total is introduced.
+
+## Frontend boundary
+
+The browser consumes the public API and does not implement F009 calculations.
+
+Manual price entry/history belongs conceptually to Instrument context.
+
+Account and Portfolio analytical views consume the valuation endpoints using explicit `as_of_date`.
+
+Detailed visual UX is not defined by Decision 020.
+
+## Migration
+
+Decision 020 requires exactly one additive Alembic migration:
+
+CREATE `market_price_observations`
+
+No existing table requires redesign or modification.
+
+In particular, no changes are required to:
+
+- `transactions`;
+- `investment_accounts`;
+- `portfolios`;
+- `instruments`.
+
+Do not add:
+
+- valuation tables;
+- position snapshots;
+- cost-basis snapshots;
+- unrealised-P&L tables;
+- selected-price snapshots.
+
+The migration is additive and backward-compatible with the currently deployed application.
+
+## Non-goals
+
+Decision 020 does not introduce:
+
+- external quote providers;
+- automatic market-data refresh;
+- intraday market-price timestamps;
+- multiple quotes per Instrument/day;
+- source/provider metadata;
+- bid/ask;
+- OHLC;
+- FX;
+- base-currency NAV;
+- cash inclusion in security valuation;
+- Portfolio NAV;
+- realised-P&L changes;
+- Fee/Tax integration into unrealised P&L;
+- Dividend/Coupon valuation;
+- performance;
+- TWR;
+- XIRR;
+- benchmarks;
+- price interpolation;
+- BUY/SELL fallback pricing;
+- inferred prices;
+- persisted valuation snapshots;
+- caching/materialized views;
+- background quote jobs;
+- soft-delete/audit history for market prices.
+
+## Reason
+
+F003 already reconstructs exact position quantity.
+
+F004 already reconstructs remaining FIFO acquisition basis.
+
+F009 defines the financial methodology required to combine those facts with explicit manual market-price observations.
+
+A single additive market-price table provides the only new persistent financial input required for v0.1 valuation.
+
+Keeping valuation derived and recomputable preserves canonical Transaction history as the accounting source of truth and avoids stale financial snapshots.
+
+Reusing existing exact-money primitives and Account-first reconstruction keeps the new capability consistent with the existing financial architecture.
+
+## Consequences
+
+The application gains a manual market-price history per Instrument and exact as-of-date security valuation.
+
+Account and Portfolio valuation remain fully recomputable from canonical history, remaining FIFO basis and applicable manual prices.
+
+Resolved market values and unrealised results remain partitioned by currency.
+
+Missing prices, unsupported negative positions, incomplete acquisition basis and currency mismatch remain explicit unresolved states.
+
+Only one additive database migration is required.
+
+No existing F001–F008 financial model needs redesign.
+
+There is no financial or architecture blocker for implementation.

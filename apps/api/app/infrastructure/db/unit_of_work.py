@@ -8,10 +8,12 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.application.contracts import (
     InstrumentRepository,
     InvestmentAccountRepository,
+    MarketPriceObservationRepository,
     PortfolioRepository,
     TransactionRepository,
 )
 from app.application.use_cases import PersistenceConflict
+from app.infrastructure.db.market_prices import SqlAlchemyMarketPriceRepository
 from app.infrastructure.db.repositories import (
     SqlAlchemyInstrumentRepository,
     SqlAlchemyInvestmentAccountRepository,
@@ -26,6 +28,9 @@ class SqlAlchemyUnitOfWork:
 
     def __enter__(self) -> SqlAlchemyUnitOfWork:
         self.session = self.session_factory()
+        self.market_prices: MarketPriceObservationRepository = SqlAlchemyMarketPriceRepository(
+            self.session
+        )
         self.portfolios: PortfolioRepository = SqlAlchemyPortfolioRepository(self.session)
         self.accounts: InvestmentAccountRepository = SqlAlchemyInvestmentAccountRepository(
             self.session

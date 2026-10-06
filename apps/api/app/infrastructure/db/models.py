@@ -14,6 +14,7 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.orm import Mapped, mapped_column
@@ -102,6 +103,29 @@ class TransactionModel(Base):
     effective_date: Mapped[date] = mapped_column(Date, nullable=False)
     settlement_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class MarketPriceObservationModel(Base):
+    __tablename__ = "market_price_observations"
+    __table_args__ = (
+        CheckConstraint("price >= 0", name="price_nonnegative"),
+        CheckConstraint("currency_code ~ '^[A-Z]{3}$'", name="currency_code_format"),
+        UniqueConstraint("instrument_id", "effective_date"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    instrument_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("instruments.id", ondelete="RESTRICT"), nullable=False
+    )
+    price: Mapped[Decimal] = mapped_column(Numeric(28, 12), nullable=False)
+    currency_code: Mapped[str] = mapped_column(String(3), nullable=False)
+    effective_date: Mapped[date] = mapped_column(Date, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

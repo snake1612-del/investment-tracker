@@ -112,6 +112,8 @@ Cloud SQLAlchemy uses `NullPool`; Neon pooled runtime URLs retain TLS/channel-bi
 
 ### Explicit operator migrations
 
+Valuation & Unrealised Result v0.1 adds only revision `0002_market_prices`, creating `market_price_observations`. Validate upgrade/downgrade/re-upgrade and drift locally first. Local Docker applies this revision before API startup. Cloud deployment does not apply it: the operator must explicitly upgrade Neon Staging before Preview valuation acceptance, and upgrade Neon Production only after Preview acceptance and a verified Production backup. Ordinary implementation/test runs must not migrate Production or reset cloud databases.
+
 Set `MIGRATION_DATABASE_URL` only in the operator process to the selected project's direct/unpooled Neon URL. Do not print it, commit it, put it into browser variables or normal Vercel runtime, or pass it in shell command arguments. Set `DATABASE_POOL_MODE=serverless`, then from `apps/api` run:
 
 ```bash

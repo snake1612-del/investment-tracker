@@ -6,6 +6,7 @@ from decimal import Decimal
 from types import TracebackType
 from typing import Protocol, Self
 
+from app.domain.market_prices import MarketPrice
 from app.domain.portfolio.engine.fifo import ExactMoney
 from app.domain.portfolio.engine.realised_pnl import UnresolvedComponent
 from app.domain.transactions import CanonicalTransaction, TransactionType
@@ -86,6 +87,28 @@ class PortfolioRepository(Protocol):
     def list(self) -> list[PortfolioRecord]: ...
 
 
+@dataclass(frozen=True)
+class MarketPriceRecord:
+    id: int
+    instrument_id: int
+    price: Decimal
+    currency_code: str
+    effective_date: date
+    created_at: datetime
+    updated_at: datetime
+
+    def fact(self) -> MarketPrice:
+        return MarketPrice(self.instrument_id, self.price, self.currency_code, self.effective_date)
+
+
+class MarketPriceObservationRepository(Protocol):
+    def add(self, fact: MarketPrice) -> MarketPriceRecord: ...
+    def get(self, instrument_id: int, observation_id: int) -> MarketPriceRecord | None: ...
+    def list_for_instruments(self, instrument_ids: list[int]) -> list[MarketPriceRecord]: ...
+    def update(self, observation_id: int, fact: MarketPrice) -> MarketPriceRecord: ...
+    def delete(self, observation_id: int) -> None: ...
+
+
 class InvestmentAccountRepository(Protocol):
     def add(self, portfolio_id: int, name: str) -> AccountRecord: ...
     def get(self, account_id: int) -> AccountRecord | None: ...
@@ -109,6 +132,7 @@ class TransactionRepository(Protocol):
 
 
 class UnitOfWork(Protocol):
+    market_prices: MarketPriceObservationRepository
     portfolios: PortfolioRepository
     accounts: InvestmentAccountRepository
     instruments: InstrumentRepository
