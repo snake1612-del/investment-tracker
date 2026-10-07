@@ -8,8 +8,9 @@ from enum import StrEnum
 from fractions import Fraction
 
 from app.domain.market_prices import MarketPrice
-from app.domain.portfolio.engine.exact import decimal_to_scaled_int
 from app.domain.portfolio.engine.fifo import ExactMoney, LotTransactionFact, reconstruct_fifo_lots
+from app.domain.portfolio.engine.marking import marked_value as _marked
+from app.domain.portfolio.engine.marking import select_prices as select_prices
 from app.domain.portfolio.engine.positions import reconstruct_positions
 from app.domain.transactions import CanonicalTransaction
 
@@ -55,31 +56,6 @@ class ValuationResult:
     @property
     def is_fully_resolved(self) -> bool:
         return all(item.is_fully_resolved for item in self.instruments)
-
-
-def select_prices(observations: Iterable[MarketPrice], as_of_date: date) -> dict[int, MarketPrice]:
-    selected: dict[int, MarketPrice] = {}
-    seen: set[tuple[int, date]] = set()
-    for observation in observations:
-        key = (observation.instrument_id, observation.effective_date)
-        if key in seen:
-            raise ValueError("Duplicate Instrument/date price facts")
-        seen.add(key)
-        previous = selected.get(observation.instrument_id)
-        if observation.effective_date <= as_of_date and (
-            previous is None or previous.effective_date < observation.effective_date
-        ):
-            selected[observation.instrument_id] = observation
-    return selected
-
-
-def _marked(quantity: Decimal, price: MarketPrice) -> ExactMoney:
-    return ExactMoney(
-        Fraction(
-            decimal_to_scaled_int(quantity, 12) * decimal_to_scaled_int(price.price, 12), 10**24
-        ),
-        price.currency_code,
-    )
 
 
 def _totals(values: Iterable[ExactMoney]) -> tuple[ExactMoney, ...]:

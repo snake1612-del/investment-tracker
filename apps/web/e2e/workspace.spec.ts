@@ -282,6 +282,89 @@ async function record(
   ).toBeVisible();
 }
 
+test("Portfolio performance preserves unresolved prices then resolves exact benchmark comparison", async ({
+  page,
+}, testInfo) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  const suffix = await createContext(page);
+  const name = `Performance ${suffix}`;
+  await record(page, "Deposit", "100");
+  await record(page, "Buy", "100", name);
+  await page.getByLabel("Account", { exact: true }).selectOption("summary");
+  await page.getByRole("tab", { name: "Performance", exact: true }).click();
+  await page.getByLabel("Performance start date").fill("2026-02-02");
+  await page.getByLabel("Performance end date").fill("2026-02-03");
+  await expect(
+    page.getByText("Portfolio TWR: Unresolved", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText(/Missing market price · 2026-02-01/),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Market prices", exact: true })
+    .click();
+  const selector = page.getByLabel("Price Instrument");
+  await expect(
+    selector.locator("option").filter({ hasText: name }),
+  ).toHaveCount(1);
+  const label = (await selector.locator("option").allTextContents()).find(
+    (text) => text.startsWith(`${name} ·`),
+  )!;
+  await selector.selectOption({ label });
+  for (const [day, amount] of [
+    ["2026-02-01", "100"],
+    ["2026-02-03", "110"],
+  ]) {
+    await page
+      .getByRole("button", { name: "Add market price", exact: true })
+      .click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toContainText(name);
+    await dialog.getByLabel("Unit market price").fill(amount);
+    await dialog.getByLabel("Price effective date").fill(day);
+    await dialog.getByRole("button", { name: "Save market price" }).click();
+    await expect(dialog).toHaveCount(0);
+  }
+  await page
+    .getByRole("button", { name: "Close market prices", exact: true })
+    .click();
+  await expect(
+    page.getByText("Portfolio TWR: 10%", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Opening Performance Value: 100 USD", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Closing Performance Value: 110 USD", { exact: true }),
+  ).toBeVisible();
+  await page.getByLabel("Benchmark Instrument").selectOption({ label });
+  await expect(
+    page.getByText("Benchmark TWR: 10%", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Active return: 0%", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Ending-value difference: 0 USD", { exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await expect(
+    page.getByText("Portfolio TWR: 10%", { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByLabel("Benchmark Instrument")).not.toHaveValue("");
+  await page.screenshot({
+    path: testInfo.outputPath("performance-benchmark.png"),
+    fullPage: true,
+  });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true);
+  expect(errors).toEqual([]);
+});
+
 test("complete manual journal journey without API or manual IDs", async ({
   page,
 }) => {

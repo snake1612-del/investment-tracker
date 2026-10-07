@@ -41,10 +41,7 @@ def reconstruct_positions(
             case TransactionType.BUY | TransactionType.SELL:
                 if transaction.instrument_id is None or transaction.quantity is None:
                     raise PositionReconstructionError("Trade lacks instrument identity or quantity")
-                quantity_units = _quantity_units(transaction.quantity)
-                effect = (
-                    quantity_units if transaction.type is TransactionType.BUY else -quantity_units
-                )
+                effect = quantity_effect_units(transaction)
                 instrument_id = transaction.instrument_id
                 units_by_instrument[instrument_id] = (
                     units_by_instrument.get(instrument_id, 0) + effect
@@ -68,3 +65,13 @@ def reconstruct_positions(
         instrument_id: _decimal_from_units(units)
         for instrument_id, units in units_by_instrument.items()
     }
+
+
+def quantity_effect_units(transaction: CanonicalTransaction) -> int:
+    """F003 signed scale-twelve quantity effect for one canonical event."""
+    if transaction.type not in {TransactionType.BUY, TransactionType.SELL}:
+        return 0
+    if transaction.instrument_id is None or transaction.quantity is None:
+        raise PositionReconstructionError("Trade lacks instrument identity or quantity")
+    units = _quantity_units(transaction.quantity)
+    return units if transaction.type is TransactionType.BUY else -units

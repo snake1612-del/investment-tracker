@@ -104,6 +104,12 @@ def _summaries(buckets: dict[str, dict[str, int]]) -> tuple[CurrencyMoneySummary
     )
 
 
+def cash_effect_units(transaction: CanonicalTransaction) -> int:
+    """Validated F008 signed cash effect, reusable by chronological reconstruction."""
+    units = _validated_units(transaction)
+    return _EFFECTS[transaction.type][0] * units
+
+
 def reconstruct_money_summary(
     transactions: Iterable[CanonicalTransaction], as_of_date: date
 ) -> tuple[CurrencyMoneySummary, ...]:
