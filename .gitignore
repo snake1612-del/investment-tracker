@@ -52,6 +52,9 @@ env/
 *.seed
 *.log
 pgdata/
+backups/
+*.dump
+investment-tracker-backup-v1_*.tar
 
 # IDEs and editors
 .idea/
