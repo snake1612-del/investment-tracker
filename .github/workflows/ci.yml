@@ -66,7 +66,7 @@ jobs:
       - name: Ruff format
         run: uv run ruff format --check .
       - name: Pyright
-        run: uv run pyright app tests
+        run: uv run pyright app tests operator_tools
       - name: Unit tests
         run: uv run pytest tests/unit
 
@@ -113,5 +113,13 @@ jobs:
         run: uv run alembic upgrade head
       - name: Check migration drift
         run: uv run alembic check
+      - name: Native PostgreSQL backup clients
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes postgresql-common
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get update
+          sudo apt-get install --yes postgresql-client-18
+          echo "/usr/lib/postgresql/18/bin" >> "$GITHUB_PATH"
       - name: PostgreSQL tests
         run: uv run pytest

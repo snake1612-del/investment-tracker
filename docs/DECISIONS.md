@@ -4394,3 +4394,368 @@ Unresolved results remain explicit and diagnostically useful rather than being s
 No public Account performance, public daily series, persisted performance state, XIRR, FX, total-return benchmark or risk analytics is introduced.
 
 ---
+
+## Decision 022 — Backup & Restore v0.1
+
+**Decision**
+
+Investment Tracker will use PostgreSQL-native logical backup and restore as the authoritative Backup & Restore v0.1 mechanism.
+
+The primary database payload is a PostgreSQL custom-format archive produced by `pg_dump` and restored through `pg_restore`.
+
+A small project-controlled envelope adds version metadata and integrity checks. Investment Tracker does not define an application-level financial export format.
+
+### Backup scope
+
+The backup contains the complete application-owned PostgreSQL schema and persisted application data required to reconstruct Investment Tracker.
+
+This includes:
+
+```text
+portfolios
+investment_accounts
+instruments
+transactions
+market_price_observations
+alembic_version
+```
+
+and their:
+
+```text
+primary keys / identity state
+foreign-key relations
+constraints and indexes
+exact NUMERIC values
+dates and timestamps
+canonical transaction metadata
+market-price metadata
+```
+
+Derived financial state is not separately backed up.
+
+Positions, FIFO lots, acquisition basis, realised P&L, unrealised P&L, valuation, money summaries, performance and benchmark results remain recomputable and are not backup entities.
+
+Database credentials, Vercel configuration, Neon credentials, local environment files and other secrets are excluded.
+
+Database roles, ownership and provider-specific cluster/global configuration are not part of the application backup contract.
+
+### Artifact contract
+
+Backup format version 1 is a bundle containing:
+
+```text
+database.dump
+manifest.json
+SHA256SUMS
+```
+
+`database.dump` is PostgreSQL custom format.
+
+The custom PostgreSQL archive provides the payload compression; the enclosing bundle does not require additional compression.
+
+`manifest.json` contains only non-secret metadata required for restore validation, including:
+
+```text
+backup_format_version
+created_at_utc
+source_environment
+source_alembic_revision
+source_postgresql_version
+pg_dump_version
+application_git_revision
+```
+
+`source_alembic_revision` is the authoritative application-schema compatibility identifier.
+
+`application_git_revision` is diagnostic metadata and does not replace the Alembic revision.
+
+`SHA256SUMS` contains SHA-256 checksums for the database payload and manifest.
+
+The canonical artifact name is conceptually:
+
+```text
+investment-tracker-backup-v1_<environment>_<UTC timestamp>_<alembic revision>_<git short SHA>.tar
+```
+
+Artifact names contain no hostnames, usernames, passwords or connection strings.
+
+### Backup creation
+
+Backup creation is read-only with respect to application data.
+
+`pg_dump` provides the database snapshot used for the backup.
+
+Application writes do not need to be stopped for a normal backup, but schema migrations must not run concurrently with backup creation.
+
+Backup generation uses a temporary/incomplete artifact location.
+
+The final artifact name becomes visible only after:
+
+```text
+pg_dump succeeds
+→ manifest is complete
+→ checksums are generated
+→ archive structural validation succeeds
+```
+
+If any step fails, no artifact is published as a valid backup.
+
+A failed or interrupted temporary artifact must never be accepted by the restore command.
+
+### Backup validation
+
+A backup is structurally valid only when all of the following hold:
+
+```text
+supported backup_format_version
+manifest parses and contains all required metadata
+SHA-256 checksums match
+database.dump is readable by pg_restore
+source Alembic revision is known to the repository
+archive contains the expected application schema
+```
+
+Structural validation establishes that the artifact is a candidate for restoration.
+
+Operational restore readiness additionally requires that the project Backup & Restore procedure has successfully passed an end-to-end isolated restore drill.
+
+Not every Production backup must itself be restored immediately after creation.
+
+### Restore target policy
+
+Backup & Restore v0.1 performs whole-application restore only.
+
+There is:
+
+```text
+no record merge
+no selective restore
+no overwrite-by-primary-key
+no partial financial restore
+```
+
+The normal restore target must be an empty PostgreSQL database with no existing Investment Tracker application objects.
+
+If application-owned tables or Alembic state already exist in the target, restore refuses before changing the target.
+
+The restore tool does not automatically drop or truncate a non-empty database.
+
+Destructive preparation of an existing target is an explicit operator action outside the restore command.
+
+### Restore atomicity
+
+Restore uses `pg_restore` with fail-fast behavior and a single transaction where supported by the archive/restore operation.
+
+If restore fails before commit, the attempted application-schema restore must not be retained as a partially valid restored database.
+
+A restore that reports PostgreSQL errors is unsuccessful even if some commands could otherwise have continued.
+
+### Schema compatibility
+
+Every artifact records its source Alembic revision.
+
+Compatibility policy is:
+
+```text
+backup revision == current approved revision
+→ restore directly
+
+backup revision is a known ancestor of current approved revision
+→ restore captured schema/data
+→ run approved Alembic migrations forward to current head
+→ verify
+
+backup revision is newer than the running repository
+or is unknown / not on the approved migration lineage
+→ reject before restore
+```
+
+Investment Tracker does not migrate an archive before restoring it.
+
+The archive first reconstructs the schema state it actually captured; normal Alembic upgrades then move that restored database forward.
+
+A target PostgreSQL server must be compatible with the PostgreSQL logical archive. v0.1 does not promise restoration from a newer PostgreSQL major version into an older server.
+
+### Environment policy
+
+Local, Staging and Production backups are distinct operational classes.
+
+Local:
+
+```text
+backup allowed
+restore allowed into an empty Local/recovery database
+```
+
+Staging:
+
+```text
+backup allowed
+restore allowed into empty Staging or isolated Local recovery database
+```
+
+Production:
+
+```text
+backup allowed
+Production artifact may contain real personal financial data
+restore allowed only into an explicitly designated Production recovery target
+```
+
+A Production backup must not be restored into shared Neon Staging, Vercel Preview infrastructure, automated-test databases or other environments where real financial data would become non-production test data.
+
+Synthetic Staging/Local backups must not be used as an implicit replacement for Production real-data recovery.
+
+### Production restore safeguards
+
+Production restore is an explicit disaster-recovery operation.
+
+Before Production restore:
+
+```text
+artifact validation must pass
+target environment must be explicitly identified as Production recovery
+normal application writes must be stopped
+target must be empty
+operator must explicitly acknowledge Production restore
+```
+
+If the existing Production database is still readable, a fresh pre-restore backup is taken before destructive replacement preparation.
+
+The restore command itself does not silently erase the current Production database.
+
+After restore and verification, normal application traffic may resume.
+
+### Backup security
+
+Backup artifacts are sensitive data.
+
+They must:
+
+```text
+never be committed to Git
+never contain credentials or connection URLs
+never print credentials into logs
+be created with owner-only filesystem access
+```
+
+Production backups containing real financial data must be encrypted at rest.
+
+v0.1 does not invent a proprietary encrypted backup format.
+
+Encryption-at-rest may be satisfied by an approved encrypted filesystem, encrypted volume or externally encrypted container used to store the backup artifact.
+
+If a Production artifact leaves that protected storage boundary, it must be encrypted before transfer.
+
+SHA-256 checksums provide corruption detection, not confidentiality or cryptographic authenticity.
+
+### Operator interface
+
+Backup and restore are operator-only CLI/script capabilities.
+
+There is no:
+
+```text
+public HTTP backup API
+browser backup UI
+Vercel backup endpoint
+background backup worker
+```
+
+The operator tools accept database connection configuration through environment/secret mechanisms and must not embed credentials into generated artifacts.
+
+The same project-controlled commands operate against Local PostgreSQL and direct Neon PostgreSQL connections.
+
+### Post-restore verification
+
+A restore is not declared successful merely because `pg_restore` exits successfully.
+
+Verification must include:
+
+```text
+expected Alembic revision
+expected application tables
+database constraints/relations usable
+representative row counts
+exact persisted NUMERIC/timestamp/identity values
+canonical relation integrity
+MarketPriceObservation integrity
+application health/read smoke test
+```
+
+If an older supported backup was restored, Alembic must reach the approved current head before final application verification.
+
+Derived financial state is verified by recomputation rather than comparison against backed-up derived artifacts.
+
+### Testing
+
+Automated Backup & Restore verification uses an isolated disposable PostgreSQL database with synthetic data covering all persisted fact types.
+
+The test workflow is:
+
+```text
+create representative persisted source state
+→ backup
+→ capture exact expected persisted facts
+→ modify/destroy isolated state
+→ restore into an empty target
+→ apply approved forward migrations when required
+→ compare all persisted facts exactly
+→ run application financial/read smoke tests
+```
+
+Exact comparison includes IDs, foreign keys, relation fields, NUMERIC values, dates, timestamps and market-price observations.
+
+The restored identity sequences must also remain usable for subsequent inserts.
+
+Negative tests include:
+
+```text
+corrupt payload
+checksum mismatch
+invalid/incomplete manifest
+unsupported backup format version
+unknown/newer Alembic revision
+unreadable PostgreSQL archive
+non-empty restore target
+failed restore rollback
+forbidden Production-to-Staging restore
+```
+
+### Persistence and runtime impact
+
+Backup & Restore v0.1 introduces:
+
+```text
+no database migration
+no new database tables
+no changes to financial domain semantics
+no Vercel runtime changes
+no Neon topology changes
+no object storage
+no scheduled jobs
+no retention system
+```
+
+It is an operational capability around the existing PostgreSQL source of truth.
+
+**Reason**
+
+PostgreSQL already provides a mature logical backup format that preserves relational structure, exact numeric values, identity data and application metadata without requiring Investment Tracker to maintain a second serialization model.
+
+A small manifest/checksum envelope adds the application-specific information needed to validate schema compatibility and safely route restores across Local, Staging and Production.
+
+Restoring only into empty targets eliminates ambiguous merge semantics and sharply reduces destructive failure modes.
+
+Keeping Alembic as schema authority allows older known backups to be restored faithfully and then migrated forward through the same reviewed migration history used by normal deployments.
+
+**Consequences**
+
+Investment Tracker gains a reproducible project-controlled disaster-recovery path without creating backup state inside the application.
+
+Backup artifacts containing Production data become sensitive assets requiring protected storage.
+
+Recovery of an old supported artifact may require a restore followed by normal forward Alembic migration.
+
+v0.1 intentionally optimizes for safe full-database recovery rather than convenience features such as scheduled backups, selective restore or cloud retention automation.

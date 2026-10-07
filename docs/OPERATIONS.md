@@ -147,20 +147,17 @@ No real investment data has been entered. The logical backup/restore gate below 
 
 ### Logical backup and restore
 
-Use PostgreSQL 18 client tools and the selected project's **direct**, TLS connection. Obtain operator credentials securely into process-local `PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, `PGDATABASE` and `PGSSLMODE=require`; do not paste secrets into command arguments or logs. Preserve any stricter TLS/channel-binding settings. Verify the project identity before exporting. Keep backups outside Git and restrict access; actual financial backups are sensitive.
+Decision 022 defines the authoritative operator workflow. See [Backup & Restore](BACKUP_RESTORE.md) for environment bindings, encrypted Production storage, empty-target restore, compatibility and post-restore verification. Use PostgreSQL 18 native clients and a direct/unpooled connection supplied securely through `BACKUP_DATABASE_URL` / `RESTORE_DATABASE_URL`; never expose credentials in command arguments or logs.
+
+From `apps/api`, with the selected Local recovery endpoints configured:
 
 ```bash
-pg_dump --format=custom --file=backup.dump
+uv run python -m operator_tools.backup backup --environment local --output ../../tmp/backups
+uv run python -m operator_tools.backup validate ../../tmp/backups/<artifact>.tar
+uv run python -m operator_tools.backup restore ../../tmp/backups/<artifact>.tar --environment local
 ```
 
-Check command success and retain an independent copy before migration. Restore only into a newly created, explicitly named disposable non-production database. Use local destination credentials (not the cloud source credentials):
-
-```bash
-createdb investment_tracker_restore_drill
-pg_restore --no-owner --no-acl --exit-on-error --dbname=investment_tracker_restore_drill backup.dump
-```
-
-Compare Alembic revision, canonical row counts and exact monetary values with the source snapshot. Remove the disposable restore database after verification, never the source. Clear credential environment variables afterwards. A backup that has not been restored and checked is not a verified recovery path.
+Restore never drops/truncates an occupied database and uses one fail-fast PostgreSQL transaction. Verify exact persisted facts, relations, identity state and application reads after restoring; forward-migrate known older revisions explicitly before application use. Artifact-valid is structural validation, not recovery readiness. Production artifacts may only restore into explicitly designated Production recovery, never shared Staging/Preview/test infrastructure. Clear credential environment variables afterwards.
 
 This milestone exported Staging through its direct connection, restored it into separate local PostgreSQL 18 and confirmed exact `125.00000001` from the synthetic journal. A direct logical Production backup was also captured before its first migration. Ignored verification artifacts are retained locally under `tmp/`; they contain synthetic data only and are not committed. This proves the logical procedure, not a scheduled backup service, retention policy or recovery SLA; maintain independent backups before real-data use and each Production migration.
 
