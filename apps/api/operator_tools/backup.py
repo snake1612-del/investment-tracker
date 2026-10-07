@@ -395,6 +395,36 @@ def backup(output: Path, environment: str, *, encrypted_storage: bool = False) -
             raise BackupError("Source snapshot failed; exclude concurrent migrations") from None
 
 
+def require_empty_target(target: psycopg.Connection) -> None:
+    """Read-only check across database-local object catalogs, not just relations."""
+    # PostgreSQL reserves OIDs below FirstNormalObjectId (16384) for initdb.
+    # This preserves built-ins, information_schema and the default public schema,
+    # while rejecting normally allocated objects even in system namespaces.
+    catalogs = target.execute(
+        "SELECT c.relname FROM pg_catalog.pg_class c "
+        "JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace "
+        "WHERE n.nspname='pg_catalog' AND c.relkind='r' AND NOT c.relisshared "
+        "AND EXISTS (SELECT 1 FROM pg_catalog.pg_attribute a "
+        "WHERE a.attrelid=c.oid AND a.attname='oid' AND NOT a.attisdropped)"
+    ).fetchall()
+    for (name,) in catalogs:
+        # Large objects alone permit an explicitly supplied, even low, OID.
+        condition = sql.SQL("TRUE" if name == "pg_largeobject_metadata" else "oid >= 16384")
+        if target.execute(
+            sql.SQL("SELECT EXISTS (SELECT 1 FROM pg_catalog.{} WHERE {})").format(
+                sql.Identifier(name), condition
+            )
+        ).fetchall()[0][0]:
+            raise BackupError("Restore target is non-empty; nothing was changed")
+    # Subscriptions are shared catalog rows, but belong to a specific database.
+    if target.execute(
+        "SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_subscription "
+        "WHERE subdbid=(SELECT oid FROM pg_catalog.pg_database "
+        "WHERE datname=current_database()))"
+    ).fetchall()[0][0]:
+        raise BackupError("Restore target is non-empty; nothing was changed")
+
+
 def restore(
     artifact: Path,
     environment: str,
@@ -425,16 +455,7 @@ def restore(
         environment_guard(value, environment, recovery=True)
         try:
             with psycopg.connect(value) as target:
-                # Reject ALL user objects, including objects outside public: this is an empty DB.
-                if target.execute(
-                    "SELECT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n "
-                    "ON n.oid=c.relnamespace WHERE n.nspname NOT LIKE 'pg_%' "
-                    "AND n.nspname <> 'information_schema') "
-                    "OR EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n "
-                    "ON n.oid=p.pronamespace WHERE n.nspname NOT LIKE 'pg_%' "
-                    "AND n.nspname <> 'information_schema')"
-                ).fetchall()[0][0]:
-                    raise BackupError("Restore target is non-empty; nothing was changed")
+                require_empty_target(target)
                 major = int(target.execute("SHOW server_version_num").fetchall()[0][0]) // 10000
                 if major < int(manifest["source_postgresql_version"].split(".")[0]):
                     raise BackupError("Target PostgreSQL major is older than source")

@@ -302,6 +302,66 @@ def test_nonempty_target_refused(artifact, monkeypatch):
     assert facts(source) == expected
 
 
+@pytest.mark.parametrize(
+    ("create", "inspect"),
+    [
+        (
+            "CREATE TYPE public.synthetic_enum AS ENUM ('one','two')",
+            "SELECT oid,enumlabel,enumsortorder FROM pg_enum ORDER BY oid",
+        ),
+        (
+            "CREATE DOMAIN public.synthetic_domain AS integer CHECK (VALUE > 0)",
+            "SELECT oid,typname,typbasetype FROM pg_type WHERE typname='synthetic_domain'",
+        ),
+        (
+            "CREATE SCHEMA synthetic_empty",
+            "SELECT oid,nspname,nspowner,nspacl FROM pg_namespace WHERE nspname='synthetic_empty'",
+        ),
+        (
+            "CREATE PUBLICATION synthetic_publication",
+            "SELECT oid,pubname,pubowner FROM pg_publication",
+        ),
+        (
+            "ALTER DEFAULT PRIVILEGES GRANT SELECT ON TABLES TO PUBLIC",
+            "SELECT oid,defaclrole,defaclnamespace,defaclobjtype,defaclacl FROM pg_default_acl",
+        ),
+        (
+            "SELECT lo_create(1234)",
+            "SELECT oid,lomowner,lomacl FROM pg_largeobject_metadata",
+        ),
+    ],
+    ids=["enum", "domain", "empty-schema", "publication", "default-acl", "low-oid-large-object"],
+)
+def test_catalog_only_objects_refuse_restore(artifact, monkeypatch, create, inspect):
+    archive, _ = artifact
+    original = tool.pg
+    restore_calls = []
+
+    def tracked_pg(name, args, env=None):
+        if name == "pg_restore" and any(arg.startswith("--dbname=") for arg in args):
+            restore_calls.append(args)
+        return original(name, args, env)
+
+    monkeypatch.setattr(tool, "pg", tracked_pg)
+    with disposable_database() as target:
+        monkeypatch.setenv("RESTORE_DATABASE_URL", native(target))
+        with psycopg.connect(native(target)) as connection:
+            connection.execute(sql.SQL(create))
+            expected = connection.execute(sql.SQL(inspect)).fetchall()
+            assert expected
+        with pytest.raises(tool.BackupError, match="non-empty"):
+            tool.restore(archive, "local")
+        assert restore_calls == []
+        with psycopg.connect(native(target)) as connection:
+            assert connection.execute(sql.SQL(inspect)).fetchall() == expected
+            assert (
+                connection.execute(
+                    "SELECT tablename FROM pg_tables WHERE schemaname='public'"
+                ).fetchall()
+                == []
+            )
+
+
 def test_actual_late_restore_failure_rolls_back(artifact, monkeypatch, tmp_path):
     _, source = artifact
     with psycopg.connect(native(source)) as connection:
