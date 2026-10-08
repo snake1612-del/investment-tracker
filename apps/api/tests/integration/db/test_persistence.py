@@ -27,6 +27,7 @@ def test_migration_creates_only_approved_tables(
         "instruments",
         "transactions",
         "market_price_observations",
+        "csv_imports",
     }
     assert {index["name"] for index in inspector.get_indexes("investment_accounts")} == {
         "ix_investment_accounts_portfolio_id"

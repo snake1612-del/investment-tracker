@@ -26,7 +26,7 @@ BASE_TABLES = {
     "transactions",
     "alembic_version",
 }
-HEAD = "0002_market_prices"
+HEAD = "0003_csv_imports"
 MEMBERS = {"database.dump", "manifest.json", "SHA256SUMS"}
 ENVIRONMENTS = {"local", "staging", "production"}
 
@@ -156,7 +156,11 @@ def environment_guard(value: str, environment: str, *, recovery: bool = False) -
 def tables(revision: str) -> set[str]:
     if revision not in lineage():
         raise BackupError("Unknown/newer or non-ancestor Alembic revision")
-    return BASE_TABLES | ({"market_price_observations"} if revision == HEAD else set())
+    return (
+        BASE_TABLES
+        | ({"market_price_observations"} if revision != "0001_initial_persistence" else set())
+        | ({"csv_imports"} if revision == HEAD else set())
+    )
 
 
 def manifest_check(value: Any) -> dict[str, Any]:

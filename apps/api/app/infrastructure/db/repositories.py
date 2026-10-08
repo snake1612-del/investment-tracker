@@ -3,10 +3,12 @@
 from datetime import UTC, datetime
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from app.application.contracts import (
     AccountRecord,
+    CsvImportRecord,
     InstrumentRecord,
     PortfolioRecord,
     TransactionRecord,
@@ -14,6 +16,7 @@ from app.application.contracts import (
 from app.application.use_cases import InvalidInput, NotFound
 from app.domain.transactions import CanonicalTransaction, TransactionType
 from app.infrastructure.db.models import (
+    CsvImportModel,
     InstrumentModel,
     InvestmentAccountModel,
     PortfolioModel,
@@ -116,6 +119,61 @@ class SqlAlchemyInstrumentRepository:
         models = self.session.scalars(select(InstrumentModel).order_by(InstrumentModel.id)).all()
         return [instrument_record(model) for model in models]
 
+    def existing_ids(self, instrument_ids: set[int]) -> set[int]:
+        if not instrument_ids:
+            return set()
+        return set(
+            self.session.scalars(
+                select(InstrumentModel.id).where(InstrumentModel.id.in_(instrument_ids))
+            )
+        )
+
+
+class SqlAlchemyCsvImportRepository:
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    @staticmethod
+    def record(model: CsvImportModel) -> CsvImportRecord:
+        return CsvImportRecord(
+            model.id,
+            model.account_id,
+            model.format_version,
+            model.source_fingerprint,
+            model.row_count,
+            model.created_at,
+        )
+
+    def get(self, account_id: int, version: str, fingerprint: str) -> CsvImportRecord | None:
+        model = self.session.scalar(
+            select(CsvImportModel).where(
+                CsvImportModel.account_id == account_id,
+                CsvImportModel.format_version == version,
+                CsvImportModel.source_fingerprint == fingerprint,
+            )
+        )
+        return self.record(model) if model is not None else None
+
+    def reserve(
+        self, account_id: int, version: str, fingerprint: str, row_count: int
+    ) -> CsvImportRecord | None:
+        # Concurrent reservations wait for the winner's commit/rollback. Only the
+        # winner inserts Transactions; unrelated conflicts must still fail.
+        model = self.session.scalar(
+            insert(CsvImportModel)
+            .values(
+                account_id=account_id,
+                format_version=version,
+                source_fingerprint=fingerprint,
+                row_count=row_count,
+            )
+            .on_conflict_do_nothing(
+                index_elements=["account_id", "format_version", "source_fingerprint"]
+            )
+            .returning(CsvImportModel)
+        )
+        return self.record(model) if model is not None else None
+
 
 class SqlAlchemyTransactionRepository:
     def __init__(self, session: Session) -> None:
@@ -187,4 +245,11 @@ class SqlAlchemyTransactionRepository:
         if model is None:
             raise NotFound("Transaction not found")
         self.session.delete(model)
+        self.session.flush()
+
+    def finalize_import_relation(self, transaction_id: int, parent_id: int) -> None:
+        model = self.session.get(TransactionModel, transaction_id)
+        if model is None:
+            raise NotFound("Imported transaction not found")
+        model.related_transaction_id = parent_id
         self.session.flush()

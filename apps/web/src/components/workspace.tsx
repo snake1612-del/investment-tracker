@@ -16,6 +16,7 @@ import {
 } from "./entry-dialogs";
 import { MoneyView, type MoneySummary } from "./money-view";
 import { CorrectionDialog } from "./correction-dialog";
+import { CsvImportDialog } from "./csv-import-dialog";
 import { History, Holdings, RealisedResult } from "./workspace-views";
 import { MarketPrices } from "./market-prices";
 import { ValuationView, type Valuation } from "./valuation-view";
@@ -338,6 +339,7 @@ function AccountWorkspace({
   const [benchmark, setBenchmark] = useState("");
   const [revision, setRevision] = useState(0);
   const [recording, setRecording] = useState(false);
+  const [importing, setImporting] = useState(false);
   const [correction, setCorrection] = useState<{
     transaction: Transaction;
     deleting: boolean;
@@ -410,6 +412,11 @@ function AccountWorkspace({
         )}
       </div>
       <div className="toolbar">
+        {account && (
+          <button className="secondary" onClick={() => setImporting(true)}>
+            Import CSV
+          </button>
+        )}
         <div role="tablist" aria-label="Workspace views">
           {(account
             ? ["Holdings", "History", "Money", "Realised result", "Valuation"]
@@ -559,6 +566,17 @@ function AccountWorkspace({
             setRecording(false);
             setRevision((r) => r + 1);
             onFeedback("Transaction recorded.");
+          }}
+        />
+      )}
+      {importing && account && (
+        <CsvImportDialog
+          accountId={account.id}
+          onClose={() => setImporting(false)}
+          onImported={(message) => {
+            setImporting(false);
+            setRevision((r) => r + 1);
+            onFeedback(message);
           }}
         />
       )}

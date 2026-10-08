@@ -19,6 +19,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.bootstrap import get_uow_factory
 from app.infrastructure.db.models import (
+    CsvImportModel,
     InstrumentModel,
     InvestmentAccountModel,
     MarketPriceObservationModel,
@@ -118,6 +119,15 @@ def seed(factory):
                     updated_at=stamp,
                 )
             )
+        session.add(
+            CsvImportModel(
+                account_id=accounts[0].id,
+                format_version="NORMALIZED_CSV_V1",
+                source_fingerprint="a" * 64,
+                row_count=8,
+                created_at=stamp,
+            )
+        )
         session.commit()
 
 
@@ -213,9 +223,16 @@ def test_exact_restore_drill(artifact, monkeypatch):
                     currency_code="USD",
                     effective_date=date(2020, 1, 1),
                 )
-                session.add_all([t, m])
+                receipt = CsvImportModel(
+                    account_id=a.id,
+                    format_version="NORMALIZED_CSV_V1",
+                    source_fingerprint="b" * 64,
+                    row_count=1,
+                )
+                session.add_all([t, m, receipt])
                 session.flush()
                 assert (p.id, a.id, i.id, t.id, m.id) == (2, 3, 3, 10, 3)
+                assert receipt.id == 2
                 session.commit()
             with psycopg.connect(native(target)) as connection:
                 invalid_statements: list[LiteralString] = [
@@ -383,12 +400,13 @@ def test_actual_late_restore_failure_rolls_back(artifact, monkeypatch, tmp_path)
             )
 
 
-def test_known_older_revision_forward_drill(monkeypatch, tmp_path):
+@pytest.mark.parametrize("revision", ["0001_initial_persistence", "0002_market_prices"])
+def test_known_older_revision_forward_drill(monkeypatch, tmp_path, revision):
     with disposable_database() as source, disposable_database() as target:
         monkeypatch.setenv("DATABASE_URL", source.render_as_string(hide_password=False))
         monkeypatch.delenv("MIGRATION_DATABASE_URL", raising=False)
         config = Config("alembic.ini")
-        command.upgrade(config, "0001_initial_persistence")
+        command.upgrade(config, revision)
         with psycopg.connect(native(source)) as connection:
             connection.execute(
                 "INSERT INTO portfolios(name,base_currency) VALUES ('Synthetic older backup','USD')"

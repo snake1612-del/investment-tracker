@@ -2314,3 +2314,283 @@ Benchmark TWR reuses F010 instead of defining a competing return methodology.
 Benchmark v1 remains a same-currency, price-only simulation.
 
 ---
+
+# Decision F012 — Normalized CSV canonical transaction import
+
+## Decision
+
+CSV Import v0.1 imports historical financial events into the existing canonical Transaction history.
+
+It does not create a separate accounting model, import ledger or alternate source of truth.
+
+Imported Transactions have the same financial semantics as manually entered canonical Transactions under F001–F011.
+
+### Supported canonical types
+
+CSV Import v0.1 supports:
+
+- DEPOSIT;
+- WITHDRAWAL;
+- BUY;
+- SELL;
+- DIVIDEND;
+- COUPON;
+- FEE;
+- TAX.
+
+The first importer accepts one project-controlled normalized CSV contract.
+
+Broker-specific parsing and mapping are outside F012. Any future broker adapter must normalize source records into the approved canonical CSV contract without changing canonical financial semantics.
+
+### Normalized row identity
+
+Every normalized CSV data row has a file-local `row_id`.
+
+`row_id` MUST be unique within that CSV.
+
+It exists for deterministic import processing, diagnostics and intra-file relationship references.
+
+It is not the canonical Transaction ID.
+
+### Required financial facts
+
+DEPOSIT and WITHDRAWAL require:
+
+- effective date;
+- currency;
+- positive cash amount.
+
+BUY and SELL require:
+
+- canonical Instrument identity;
+- effective date;
+- currency;
+- positive quantity;
+- positive price;
+- positive cash amount.
+
+A factual settlement date may additionally be provided for BUY/SELL.
+
+DIVIDEND and COUPON require:
+
+- canonical Instrument identity;
+- effective date;
+- currency;
+- positive gross cash amount.
+
+FEE and TAX require:
+
+- effective date;
+- currency;
+- positive cash amount.
+
+FEE and TAX may additionally contain:
+
+- canonical Instrument identity;
+- an intra-file related-row reference.
+
+All type-specific facts follow the already approved manual-entry semantics.
+
+### Independent trade facts
+
+For BUY and SELL:
+
+- quantity;
+- price;
+- cash amount
+
+remain independent factual canonical values.
+
+The importer MUST NOT calculate, replace or correct one from either of the others.
+
+In particular it MUST NOT force:
+
+`cash_amount = quantity × price`.
+
+A discrepancy does not by itself invalidate an otherwise canonical-valid trade.
+
+### Dates
+
+Normalized CSV `effective_date` becomes canonical `effective_date` without reinterpretation.
+
+For BUY/SELL it MUST represent the factual trade/execution date.
+
+Settlement or posting dates MUST NOT silently be substituted for an unknown trade date.
+
+If factual settlement date is supplied, it remains a separate settlement fact and must satisfy the approved manual-entry rules.
+
+The importer MUST NOT infer T+1, T+2 or another settlement convention.
+
+### Same-date deterministic ordering
+
+F004 remains authoritative:
+
+`effective_date ASC, then transaction_id ASC`.
+
+Within one CSV import, physical normalized CSV row order is the authoritative import order.
+
+Architecture MUST preserve that row order in the relative canonical transaction-ID ordering of imported transactions sharing the same effective date.
+
+The importer MUST NOT reorder same-date rows by transaction type, Instrument, relationship or another inferred financial rule.
+
+Existing canonical Transactions retain their existing IDs.
+
+New imported Transactions therefore follow existing same-date Transactions according to F004's transaction-ID tie-break and preserve their normalized CSV row order relative to one another.
+
+This rule provides deterministic v0.1 ordering but does not claim to reconstruct unknown intraday chronology.
+
+F012 does not introduce an execution timestamp or separate source-sequence override for F004.
+
+### FEE and TAX relationships
+
+A FEE or TAX may be standalone.
+
+When a normalized FEE/TAX row refers to another row in the same CSV, it uses that row's unique file-local identity.
+
+The relationship is resolved to the resulting canonical Transaction relationship only after the full file has been validated.
+
+The parent may occur before or after the child in file order.
+
+A relationship:
+
+- must remain within the same InvestmentAccount;
+- must not reference the transaction itself;
+- must not use another FEE/TAX as its originating parent in v0.1;
+- may have multiple FEE/TAX children;
+- must preserve Instrument consistency when both child and parent identify an Instrument.
+
+A missing, duplicate, ambiguous or invalid specified parent invalidates the entire import.
+
+A relation does not merge or rewrite any monetary amount and does not change cash, F005 or FX semantics.
+
+CSV v0.1 does not create a new relation from an imported row to an already existing canonical Transaction.
+
+### Instrument resolution
+
+The normalized CSV contract identifies Instruments by canonical internal Instrument identity.
+
+The canonical importer MUST NOT guess an Instrument from name, ticker, price, currency or another heuristic.
+
+An Instrument reference must resolve to exactly one existing canonical Instrument.
+
+Missing or ambiguous Instrument identity invalidates the import where Instrument is required.
+
+Future broker-specific mapping from ISIN, ticker, FIGI or other identifiers occurs before canonical CSV import and must itself produce an unambiguous canonical Instrument identity.
+
+### Exact numbers and currencies
+
+All numeric CSV facts are parsed exactly without binary floating point.
+
+Existing canonical precision, scale, range and representability rules remain authoritative.
+
+A value that cannot be represented exactly under those rules is rejected rather than rounded or truncated.
+
+Canonical direction continues to be represented by Transaction type, not by signed input magnitudes.
+
+Currency codes must already satisfy the approved canonical three-uppercase-ASCII-letter representation.
+
+The importer does not silently normalize or convert currencies.
+
+### Duplicate and repeated import semantics
+
+Financial events MUST NOT be deduplicated solely because their transaction fields are equal.
+
+Two identical-looking transactions may represent two distinct factual events.
+
+However, repeated import of the same normalized import source MUST be idempotent.
+
+Re-submitting the same import must leave canonical financial history unchanged and MUST NOT create a second copy of its Transactions.
+
+Architecture must provide stable import identity or equivalent deterministic duplicate-import detection.
+
+The physical mechanism is outside F012.
+
+F012 does not attempt heuristic cross-file transaction reconciliation where stable source identity is unavailable.
+
+### Atomicity
+
+CSV Import v0.1 is whole-file atomic.
+
+Before any canonical Transaction is committed, the complete file must be:
+
+- parsed;
+- type-validated;
+- financially validated;
+- checked for exact numeric representability;
+- resolved against canonical Instruments;
+- checked for repeated-import identity;
+- checked for unique row identities;
+- resolved and validated for intra-file FEE/TAX relationships;
+- prepared with deterministic row ordering.
+
+If any row or required relationship is invalid or unresolved, no Transaction from the file is committed.
+
+Partial-success import is not permitted in v0.1.
+
+### Existing history and derived state
+
+Imported events are ordinary canonical Transactions.
+
+Historical and backdated import is allowed.
+
+Imported events participate in canonical ordering together with existing manual history.
+
+No special import precedence exists.
+
+Positions, FIFO matching, cost basis, gross realised P&L, money reconstruction, valuation, unrealised result and performance remain derived and recomputable from the resulting current canonical history.
+
+An imported canonical fact is not rejected merely because derived reconstruction later produces an approved unresolved or negative state such as oversell, negative cash, missing acquisition basis or other incomplete-history outcome.
+
+### No corrective inference
+
+CSV Import v0.1 MUST NOT:
+
+- merge trades automatically;
+- calculate missing trade amounts from other fields;
+- derive FEE or TAX from another monetary amount;
+- invent gross income from unsupported net-only income data;
+- create FX conversions;
+- modify broker/source data based on financial guesses;
+- infer missing Instruments;
+- infer settlement conventions;
+- use future or unrelated financial facts to repair an incomplete row.
+
+If a source cannot be deterministically normalized into approved canonical facts, that source row remains outside CSV v0.1 canonical import.
+
+## Reason
+
+Canonical Transaction history is already the accounting source of truth and all financial calculations are derived from it.
+
+CSV import therefore needs only a deterministic, lossless path for creating the same canonical facts at scale.
+
+Applying existing manual-entry financial semantics prevents imported history from becoming a second accounting convention.
+
+Whole-file atomicity avoids accidental partial histories that could materially alter positions, FIFO, realised P&L, cash and performance.
+
+Explicit file-local row identity allows deterministic intra-file relationships without depending on canonical IDs that do not exist before creation.
+
+Preserving normalized row order for same-date imported events provides deterministic F004 FIFO behavior while acknowledging that the current canonical model has no true intraday chronology.
+
+Stable import idempotency prevents repeated ingestion from silently duplicating financial history, while avoiding unsafe value-based deduplication of genuinely distinct but identical-looking transactions.
+
+## Consequences
+
+Architecture may implement one normalized project-controlled CSV importer that creates ordinary canonical Transactions.
+
+All eight existing canonical transaction types may be imported.
+
+No new financial calculation engine is required.
+
+Architecture must guarantee:
+
+- exact parsing;
+- existing canonical validation;
+- unambiguous Instrument resolution;
+- whole-file atomicity;
+- stable repeated-import detection;
+- deterministic same-date imported ordering;
+- resolution of intra-file FEE/TAX relationships;
+- no partial commits;
+- no financial inference.
+
+Broker-specific parsing, cross-file reconciliation, source-provenance models, intraday chronology, market-price import, FX and corporate actions remain outside F012.

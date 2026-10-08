@@ -59,8 +59,9 @@ pg_restore uses fail-fast and a single transaction; PostgreSQL errors roll back.
 The tool then checks captured revision and row counts. This is not yet complete
 application recovery verification.
 
-- Current revision `0002_market_prices`: restore captured schema directly.
-- Known ancestor `0001_initial_persistence`: restore captured schema first, then
+- Current revision `0003_csv_imports`: restore captured schema directly, including
+  immutable `csv_imports` receipts (Decision 023).
+- Known ancestors `0001_initial_persistence` / `0002_market_prices`: restore captured schema first, then
   run the normal approved explicit Alembic upgrade to head, current and check.
 - Unknown/newer/non-lineage revision: reject before changing the target.
 

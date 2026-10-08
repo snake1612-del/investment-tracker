@@ -3,6 +3,7 @@ from fastapi import FastAPI
 from app.api.errors import register_error_handlers
 from app.api.routes.accounts import router as accounts_router
 from app.api.routes.cash import router as cash_router
+from app.api.routes.csv_imports import router as csv_imports_router
 from app.api.routes.health import router as health_router
 from app.api.routes.instruments import router as instruments_router
 from app.api.routes.money import router as money_router
@@ -18,6 +19,7 @@ app.include_router(accounts_router)
 app.include_router(instruments_router)
 app.include_router(transactions_router)
 app.include_router(cash_router)
+app.include_router(csv_imports_router)
 app.include_router(money_router)
 app.include_router(valuation_router)
 app.include_router(performance_router)

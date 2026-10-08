@@ -4759,3 +4759,565 @@ Backup artifacts containing Production data become sensitive assets requiring pr
 Recovery of an old supported artifact may require a restore followed by normal forward Alembic migration.
 
 v0.1 intentionally optimizes for safe full-database recovery rather than convenience features such as scheduled backups, selective restore or cloud retention automation.
+
+# Decision 023 — CSV Import v0.1 Architecture
+
+## Decision
+
+CSV Import v0.1 will import one project-controlled normalized CSV source into one explicitly selected InvestmentAccount.
+
+Every successfully imported row becomes an ordinary canonical Transaction.
+
+CSV import does not create an alternative accounting ledger, imported-position state, imported FIFO state, or imported financial-result state.
+
+Derived state remains reconstructed from the resulting canonical Transaction history.
+
+### Target Account
+
+The target InvestmentAccount is selected outside the CSV through the import request path.
+
+The normalized CSV does not contain `account_id`.
+
+Every imported Transaction receives the Account identified by the request.
+
+The same normalized source may therefore be imported independently into different Accounts.
+
+### Normalized CSV format
+
+CSV Import v0.1 supports one format version:
+
+NORMALIZED_CSV_V1
+
+The required header is exactly, in this exact order:
+
+row_id,type,effective_date,settlement_date,instrument_id,quantity,price,cash_amount,currency_code,related_row_id,note
+
+No missing, additional, reordered, or renamed columns are accepted.
+
+The file encoding is UTF-8.
+
+An optional UTF-8 BOM is accepted only at the beginning of the file and is not part of logical source identity.
+
+LF and CRLF record endings are accepted.
+
+The delimiter is comma.
+
+The quote character is `"`, with `""` used to escape a literal quote.
+
+Each data record occupies one physical CSV record. Embedded CR/LF characters inside fields are rejected in v0.1.
+
+Blank data records are rejected.
+
+A header-only file contains no importable transactions and is rejected.
+
+### Cell syntax
+
+`row_id` is a source-local identifier matching:
+
+[A-Za-z0-9._-]{1,64}
+
+and must be unique within the file.
+
+`related_row_id`, when present, uses the same identifier syntax and references another `row_id` in the same source.
+
+`type` is exactly one of:
+
+DEPOSIT
+WITHDRAWAL
+BUY
+SELL
+DIVIDEND
+COUPON
+FEE
+TAX
+
+Dates use exact ISO form:
+
+YYYY-MM-DD
+
+Canonical numeric source cells use unsigned plain decimal notation only, e.g.:
+
+0
+12
+12.50
+0.00000001
+
+No exponent notation, leading plus/minus sign, thousands separator, locale decimal separator, or surrounding whitespace is accepted.
+
+Exact Decimal parsing is used. Binary floating point is never used.
+
+Canonical domain validation remains authoritative for positivity and exact database representability.
+
+`instrument_id` is a positive base-10 canonical Instrument ID.
+
+`currency_code` is exactly three uppercase ASCII letters.
+
+Empty cells represent absence only where the field is nullable for the applicable transaction type.
+
+No automatic whitespace trimming or financial-value normalization is performed.
+
+`note` may contain normal UTF-8 text and CSV quoting, but no embedded line break in v0.1. An empty note cell represents no note.
+
+### Type-specific columns
+
+DEPOSIT and WITHDRAWAL require:
+
+- effective_date
+- cash_amount
+- currency_code
+
+and may contain `note`.
+
+Their:
+
+- settlement_date
+- instrument_id
+- quantity
+- price
+- related_row_id
+
+must be empty.
+
+BUY and SELL require:
+
+- effective_date
+- instrument_id
+- quantity
+- price
+- cash_amount
+- currency_code
+
+and may contain:
+
+- settlement_date
+- note
+
+Their `related_row_id` must be empty.
+
+DIVIDEND and COUPON require:
+
+- effective_date
+- instrument_id
+- cash_amount
+- currency_code
+
+and may contain `note`.
+
+Their:
+
+- settlement_date
+- quantity
+- price
+- related_row_id
+
+must be empty.
+
+FEE and TAX require:
+
+- effective_date
+- cash_amount
+- currency_code
+
+and may contain:
+
+- instrument_id
+- related_row_id
+- note
+
+Their:
+
+- settlement_date
+- quantity
+- price
+
+must be empty.
+
+Existing canonical Transaction validation remains authoritative after CSV parsing.
+
+### Instrument resolution
+
+CSV Import v0.1 never creates or matches Instruments.
+
+Every non-empty `instrument_id` must identify an already existing canonical Instrument by exact ID.
+
+Instrument name, ticker, ISIN, symbol, or other descriptive fields are not accepted as substitute identity.
+
+Instrument existence is validated before any Transaction from a new import is persisted.
+
+### FEE / TAX relation semantics
+
+CSV does not contain canonical database transaction IDs for imported relations.
+
+FEE and TAX use:
+
+related_row_id
+
+to refer to another row in the same normalized source.
+
+`related_row_id` may refer to a row appearing before or after the child row.
+
+A related parent:
+
+- must exist in the same CSV source;
+- must not be the child itself;
+- must not be FEE;
+- must not be TAX.
+
+If both child and parent contain an Instrument identity, the identities must match according to the approved canonical relation semantics.
+
+A missing `related_row_id` means a standalone FEE/TAX.
+
+CSV Import v0.1 does not link an imported FEE/TAX directly to a pre-existing database Transaction.
+
+### Two-pass relation resolution
+
+Relation resolution is logically two-pass.
+
+Before persistence:
+
+parse all rows
+→ validate row identities and fields
+→ resolve every related_row_id against the complete source
+→ validate relation semantics
+
+Physical CSV order is never changed to satisfy relation dependencies.
+
+During persistence, all Transaction rows are assigned IDs strictly in physical CSV row order.
+
+Imported FEE/TAX rows whose parent database ID is not yet available may initially be inserted with no persisted relation inside the still-uncommitted database transaction.
+
+After every imported row has received its database ID:
+
+row_id → transaction_id
+
+is available.
+
+A second persistence pass finalizes the FEE/TAX `related_transaction_id` values before commit.
+
+This relation finalization is part of initial import creation, not a later canonical correction.
+
+No intermediate unlinked state is committed or visible as a successful import.
+
+### Transaction ordering
+
+Physical CSV data-row order is authoritative for newly imported Transaction identity ordering.
+
+Transactions are inserted sequentially in that order.
+
+Therefore for imported rows:
+
+physical row A before row B
+→ transaction_id(A) < transaction_id(B)
+
+regardless of effective date or relation direction.
+
+Database IDs are not required to be contiguous and their exact numeric values are not part of the import contract.
+
+Existing Transactions that already existed before the import retain their existing lower identities.
+
+Consequently existing same-date Transactions remain earlier than newly imported same-date Transactions under the approved F004 `(effective_date, transaction_id)` chronology.
+
+CSV Import does not reorder rows by:
+
+- effective_date
+- type
+- row_id
+- Instrument
+- relation hierarchy
+
+### Stable source identity
+
+Idempotency is based on a stable normalized-source fingerprint, not on comparison of financial fields.
+
+The fingerprint algorithm is:
+
+SHA-256(
+    format-version marker
+    +
+    canonical logical CSV serialization
+)
+
+The canonical serialization contains:
+
+- the exact v1 header;
+- all parsed cell strings;
+- all columns;
+- all row_id values;
+- all related_row_id values;
+- notes;
+- physical data-row order.
+
+Parsed rows are deterministically re-serialized with the v1 comma/quote rules and LF record endings before hashing.
+
+Transport differences such as UTF-8 BOM presence, CRLF versus LF, or equivalent CSV quoting therefore do not create a different fingerprint when the parsed logical cell content is identical.
+
+Financial source text itself is not semantically normalized for fingerprinting.
+
+For example:
+
+`1.0`
+
+and:
+
+`1.00`
+
+are different normalized source cell strings and therefore may produce different fingerprints even though they represent the same Decimal value.
+
+Likewise changing `row_id`, `note`, row order, or any other cell changes source identity.
+
+The system must not deduplicate different sources merely because their financial facts happen to be equal.
+
+### Import receipt persistence
+
+Durable idempotency requires one new metadata entity:
+
+csv_imports
+
+with conceptually:
+
+id                  BIGINT IDENTITY PK
+account_id          BIGINT NOT NULL FK → investment_accounts
+format_version      VARCHAR NOT NULL
+source_fingerprint  CHAR(64) NOT NULL
+row_count           INTEGER NOT NULL
+created_at          TIMESTAMPTZ NOT NULL
+
+with:
+
+UNIQUE(account_id, format_version, source_fingerprint)
+row_count > 0
+
+The import receipt is immutable.
+
+It contains no CSV payload, filename, row-level financial data, Transaction copies, derived state, or row-to-Transaction mapping.
+
+There is no import status column.
+
+Only successfully committed imports have a persisted receipt.
+
+Failed validation or failed persistence leaves no receipt.
+
+The receipt remains present if imported Transactions are later corrected or deleted.
+
+Therefore re-uploading the same successfully imported normalized source to the same Account does not silently recreate Transactions that were subsequently changed or deleted.
+
+An explicit force-reimport/reset workflow is outside v0.1.
+
+The receipt is idempotency metadata only and does not become an accounting ledger.
+
+### Idempotency behavior
+
+Idempotency scope is:
+
+(target account_id, NORMALIZED_CSV_V1, source_fingerprint)
+
+The same source uploaded again to the same Account creates no Transactions.
+
+The same source may be imported into another Account.
+
+A normal duplicate request returns the existing successful import receipt as an idempotent result rather than a validation or persistence error.
+
+The database unique constraint is the final concurrency-safe idempotency boundary.
+
+Concurrent attempts to import the same Account/source must result in exactly one committed Transaction batch and one import receipt.
+
+### Import pipeline
+
+A new source follows this order:
+
+1. decode UTF-8
+2. parse normalized CSV
+3. compute stable source fingerprint
+4. verify target Account / check existing import receipt
+5. validate every row syntactically
+6. validate canonical type-specific facts
+7. validate all referenced Instruments
+8. resolve and validate all related_row_id references
+9. only after complete validation, reserve import identity
+10. insert Transactions sequentially in physical CSV order
+11. build row_id → transaction_id mapping
+12. finalize imported FEE/TAX database relations
+13. commit the import receipt and every Transaction once
+
+For a previously committed identical source, the use case may return the existing receipt after source parsing/fingerprinting and Account-scoped idempotency lookup without recreating or revalidating the historical imported facts.
+
+No writes occur before a new source has completed validation.
+
+### Atomicity
+
+One CSV source is one Unit of Work.
+
+The import receipt, all Transactions, and all resolved related-transaction links commit together.
+
+If any persistence step fails:
+
+- all Transaction inserts roll back;
+- all relation finalization rolls back;
+- the import receipt rolls back.
+
+There is no partial import.
+
+PostgreSQL identity sequences may contain gaps after a failed transaction. Such gaps are not financial state and do not violate ordering semantics.
+
+### Derived state
+
+CSV import does not persist or directly mutate:
+
+- positions
+- FIFO lots
+- cost basis
+- realised P&L
+- unrealised P&L
+- money summaries
+- valuation
+- performance
+- benchmark results
+
+After successful commit, subsequent read capabilities reconstruct from the updated canonical Transaction history.
+
+Backdated imported rows therefore affect derived historical results through the same existing reconstruction rules as manually entered canonical Transactions.
+
+### Public API
+
+The public v0.1 endpoint is:
+
+POST /accounts/{account_id}/transaction-imports/csv
+
+The request body is the CSV file itself with:
+
+Content-Type: text/csv; charset=utf-8
+
+Multipart form-data and object storage are not required.
+
+No separate validation endpoint or background import job is introduced.
+
+A valid new import returns HTTP 201.
+
+A successfully recognized duplicate source returns HTTP 200 without creating Transactions.
+
+The response contains conceptually:
+
+import_id
+status = IMPORTED | ALREADY_IMPORTED
+format_version
+source_fingerprint
+row_count
+
+It does not need to return every created Transaction ID; clients refetch canonical History after import.
+
+### Validation diagnostics
+
+Invalid files return HTTP 422 and commit nothing.
+
+Diagnostics are structured and deterministic.
+
+A row-level diagnostic contains conceptually:
+
+row_number
+row_id
+field
+code
+message
+
+`row_number` is the physical CSV data line number when available.
+
+`row_id` is included whenever it can be parsed reliably.
+
+File-level failures such as invalid encoding, malformed CSV, or invalid header may omit row identity.
+
+Relation failures are attributed to the FEE/TAX child row.
+
+Typical stable diagnostic codes include:
+
+INVALID_ENCODING
+INVALID_CSV
+INVALID_HEADER
+EMPTY_IMPORT
+INVALID_ROW_ID
+DUPLICATE_ROW_ID
+MISSING_REQUIRED_FIELD
+FORBIDDEN_FIELD
+INVALID_DECIMAL
+INVALID_DATE
+INVALID_TRANSACTION
+INSTRUMENT_NOT_FOUND
+RELATED_ROW_NOT_FOUND
+INVALID_RELATED_ROW_TYPE
+RELATED_ROW_SELF_REFERENCE
+RELATED_INSTRUMENT_MISMATCH
+
+Validation should collect independent row-level errors where practical rather than committing rows until the first failure.
+
+A missing target Account uses the existing HTTP 404 convention.
+
+Unexpected persistence conflicts remain server/persistence failures and do not authorize partial commit.
+
+### Browser boundary
+
+The browser workflow is:
+
+select Account
+→ choose normalized CSV file
+→ submit one whole file
+→ receive import result or diagnostics
+→ refetch affected canonical/derived reads
+
+The browser does not create one HTTP request per CSV row.
+
+The browser does not assign canonical Transaction IDs, resolve related database IDs, calculate derived state, or perform financial deduplication.
+
+No import-history dashboard is introduced.
+
+### Migration
+
+CSV Import v0.1 requires one additive migration creating only:
+
+csv_imports
+
+No existing Transaction, Account, Instrument, MarketPriceObservation, or financial-result table is changed.
+
+The expected next migration is conceptually:
+
+0003_csv_imports
+
+subject to the repository's actual migration naming at implementation time.
+
+The idempotency receipt is application-owned persisted metadata and is therefore included in whole-database Backup & Restore under Decision 022.
+
+### Cloud/runtime impact
+
+No new Vercel service, Neon project, object storage, background worker, queue, or scheduled job is required.
+
+Local Docker behavior is unchanged apart from applying the additive migration through the existing migration workflow.
+
+Neon Staging and Production receive the same reviewed additive migration through the existing explicit cloud-migration process.
+
+No runtime environment variable is required specifically for CSV import.
+
+## Reason
+
+Canonical Transactions must remain the only financial source of truth.
+
+A small immutable import receipt provides durable source-level idempotency without duplicating transaction facts or creating an import ledger.
+
+Hashing canonical logical CSV content distinguishes repeated delivery of one normalized source from unrelated sources that happen to contain equal financial facts.
+
+Sequential Transaction insertion preserves the physical source order required by F004 transaction-ID chronology.
+
+Resolving related row references after IDs have been assigned allows a FEE/TAX parent to appear anywhere in the file without reordering the imported Transactions.
+
+One synchronous Account-scoped request and one Unit of Work are sufficient for the current single-user normalized-import capability.
+
+## Consequences
+
+CSV Import v0.1 introduces one small persisted metadata table and one additive migration.
+
+A successful source can be delivered repeatedly to the same Account without duplicate canonical Transactions.
+
+Changing source row identity, source text, or row order intentionally creates a different import identity; v0.1 does not attempt semantic financial deduplication.
+
+Imported Transaction IDs preserve source row order but are not promised to be contiguous.
+
+Imported relations may reference later CSV rows without affecting that ordering.
+
+No partial import, automatic Instrument matching, broker-specific translation, or derived-state persistence is introduced.

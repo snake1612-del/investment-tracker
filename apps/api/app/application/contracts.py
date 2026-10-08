@@ -119,6 +119,24 @@ class InstrumentRepository(Protocol):
     def add(self, name: str) -> InstrumentRecord: ...
     def get(self, instrument_id: int) -> InstrumentRecord | None: ...
     def list(self) -> list[InstrumentRecord]: ...
+    def existing_ids(self, instrument_ids: set[int]) -> set[int]: ...
+
+
+@dataclass(frozen=True)
+class CsvImportRecord:
+    id: int
+    account_id: int
+    format_version: str
+    source_fingerprint: str
+    row_count: int
+    created_at: datetime
+
+
+class CsvImportRepository(Protocol):
+    def get(self, account_id: int, version: str, fingerprint: str) -> CsvImportRecord | None: ...
+    def reserve(
+        self, account_id: int, version: str, fingerprint: str, row_count: int
+    ) -> CsvImportRecord | None: ...
 
 
 class TransactionRepository(Protocol):
@@ -129,9 +147,11 @@ class TransactionRepository(Protocol):
         self, transaction_id: int, facts: CanonicalTransaction
     ) -> TransactionRecord: ...
     def delete_for_account(self, account_id: int, transaction_id: int) -> None: ...
+    def finalize_import_relation(self, transaction_id: int, parent_id: int) -> None: ...
 
 
 class UnitOfWork(Protocol):
+    csv_imports: CsvImportRepository
     market_prices: MarketPriceObservationRepository
     portfolios: PortfolioRepository
     accounts: InvestmentAccountRepository

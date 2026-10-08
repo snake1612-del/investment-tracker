@@ -1,5 +1,69 @@
 import { expect, test, type Page } from "@playwright/test";
 
+test("normalized CSV imports atomically and repeat source adds no transactions", async ({
+  page,
+}) => {
+  const suffix = await createContext(page);
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  const header =
+    "row_id,type,effective_date,settlement_date,instrument_id,quantity,price,cash_amount,currency_code,related_row_id,note\n";
+  const valid =
+    header + `deposit,DEPOSIT,2020-01-01,,,,,100.00000001,USD,,CSV ${suffix}\n`;
+  async function upload(content: string) {
+    await page.getByRole("button", { name: "Import CSV", exact: true }).click();
+    const dialog = page.getByRole("dialog");
+    await dialog.getByLabel("CSV file").setInputFiles({
+      name: "synthetic.csv",
+      mimeType: "text/csv",
+      buffer: Buffer.from(content),
+    });
+    await dialog.getByRole("button", { name: "Import", exact: true }).click();
+    return dialog;
+  }
+  let dialog = await upload(
+    valid + "invalid,DEPOSIT,2020-01-01,,,,,-1,USD,,\n",
+  );
+  await expect(dialog).toContainText("INVALID_DECIMAL");
+  await dialog.getByRole("button", { name: "Close" }).click();
+  await page.getByRole("tab", { name: "History", exact: true }).click();
+  await expect(page.getByText("No transactions yet")).toBeVisible();
+  dialog = await upload(valid);
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByText("Imported 1 transactions.")).toBeVisible();
+  const rows = page.locator(
+    ".history-table tbody tr:visible, .history-mobile article:visible",
+  );
+  await expect(rows).toHaveCount(1);
+  await upload(valid);
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(
+    page.getByText("Already imported. No new transactions were created."),
+  ).toBeVisible();
+  await expect(rows).toHaveCount(1);
+  await page.getByRole("tab", { name: "Money", exact: true }).click();
+  await page.getByLabel("As of date").fill("2020-01-01");
+  await expect(page.locator(".money-balance")).toHaveText("100.00000001 USD");
+  await page.reload();
+  await page.getByLabel("Portfolio", { exact: true }).selectOption({
+    label: await page
+      .getByLabel("Portfolio", { exact: true })
+      .locator("option")
+      .filter({ hasText: `Browser Portfolio ${suffix}` })
+      .innerText(),
+  });
+  await page.getByLabel("Account", { exact: true }).selectOption({
+    label: await page
+      .getByLabel("Account", { exact: true })
+      .locator("option")
+      .filter({ hasText: `Browser Account ${suffix}` })
+      .innerText(),
+  });
+  await page.getByRole("tab", { name: "History", exact: true }).click();
+  await expect(rows).toHaveCount(1);
+  expect(errors).toEqual([]);
+});
+
 test("cash income and linked Tax corrections remain exact with safe parent deletion", async ({
   page,
 }, testInfo) => {

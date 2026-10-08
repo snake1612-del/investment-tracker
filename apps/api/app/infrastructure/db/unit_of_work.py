@@ -6,6 +6,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.application.contracts import (
+    CsvImportRepository,
     InstrumentRepository,
     InvestmentAccountRepository,
     MarketPriceObservationRepository,
@@ -15,6 +16,7 @@ from app.application.contracts import (
 from app.application.use_cases import PersistenceConflict
 from app.infrastructure.db.market_prices import SqlAlchemyMarketPriceRepository
 from app.infrastructure.db.repositories import (
+    SqlAlchemyCsvImportRepository,
     SqlAlchemyInstrumentRepository,
     SqlAlchemyInvestmentAccountRepository,
     SqlAlchemyPortfolioRepository,
@@ -28,6 +30,7 @@ class SqlAlchemyUnitOfWork:
 
     def __enter__(self) -> SqlAlchemyUnitOfWork:
         self.session = self.session_factory()
+        self.csv_imports: CsvImportRepository = SqlAlchemyCsvImportRepository(self.session)
         self.market_prices: MarketPriceObservationRepository = SqlAlchemyMarketPriceRepository(
             self.session
         )
