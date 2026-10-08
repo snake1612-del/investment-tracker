@@ -22,13 +22,14 @@ The revised MVP v0.1 is a usable personal manual investment journal. Manual Port
 - Public Account and Portfolio reads expose exact position quantities, gross trade-cash realised P&L, and as-of-date Money summaries with recorded cash and separate income/outflow totals by currency.
 - FIFO lots and cost-basis reconstruction are internal, recomputable derived capabilities, not public lot/cost-basis APIs.
 - Financial facts preserve independent quantity / price / cash inputs. Realised P&L uses exact rational money, remains partitioned by currency, and explicitly reports unresolved missing-basis or currency-mismatch components. It is not net, tax-adjusted or FX-converted profit.
-- The browser supports Portfolio/Account browsing and creation, Instrument selection/creation, manual DEPOSIT / WITHDRAWAL / BUY / SELL / DIVIDEND / COUPON / FEE / TAX, Account History with edit/hard-delete for all eight types, and Account/Portfolio Holdings, Money, gross realised results and as-of security Valuation. Instrument market-price history supports create/edit/hard-delete. Fee/Tax can be standalone or linked for context. Performance, benchmark and imports remain future capabilities.
+- The browser supports Portfolio/Account browsing and creation, Instrument selection/creation, manual DEPOSIT / WITHDRAWAL / BUY / SELL / DIVIDEND / COUPON / FEE / TAX, Account History with edit/hard-delete for all eight types, and Account/Portfolio Holdings, Money, gross realised results and as-of security Valuation. Instrument market-price history supports create/edit/hard-delete. Fee/Tax can be standalone or linked for context. Portfolio Performance exposes exact time-weighted return and request-scoped benchmark comparison with explicit unresolved states. Account-scoped NORMALIZED_CSV_V1 import is implemented with whole-file atomicity and source-based idempotency.
 
 ## Documentation
 
 - [Product definition](PRODUCT.md)
 - [Decision log](docs/DECISIONS.md)
 - [Financial methodology](docs/CALCULATIONS.md)
+- [Normalized CSV import](docs/CSV_IMPORT.md)
 - [Local runtime and operations](docs/OPERATIONS.md)
 - [Repository workflow](AGENTS.md)
 
